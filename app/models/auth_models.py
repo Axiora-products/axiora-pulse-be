@@ -1,16 +1,15 @@
 """
 app/models/auth_models.py
 ────────────────────────────────────────────────────────────────────────────────
-Pydantic models for authentication endpoints.
+Pydantic request/response models for all authentication endpoints.
 
-Validation rules (zero custom regex used):
-  • Email  → validated by Pydantic's built-in EmailStr (uses the email-validator
-             library under the hood).
-  • Password → validated using Python's built-in str methods:
-             .isupper(), .islower(), .isdigit(), .isprintable(), and
-             the built-in any() function.
+Endpoints covered:
+  POST /register    → UserRegisterRequest  → RegisterResponse
+  POST /verifyOTP   → VerifyOTPRequest     → VerifyOTPResponse
+  POST /resendOTP   → ResendOTPRequest     → RegisterResponse
+  POST /login       → UserLoginRequest     → LoginSuccessResponse
 """
-from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, field_validator
 
@@ -19,7 +18,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 class UserRegisterRequest(BaseModel):
     """Payload for POST /api/v1/auth/register."""
-    email: EmailStr
+    username: EmailStr          # email address used as the unique username
     password: str
 
     @field_validator("password")
@@ -52,22 +51,43 @@ class UserRegisterRequest(BaseModel):
 
 class UserLoginRequest(BaseModel):
     """Payload for POST /api/v1/auth/login."""
-    email: EmailStr
+    username: EmailStr
     password: str
+
+
+class VerifyOTPRequest(BaseModel):
+    """Payload for POST /api/v1/auth/verifyOTP."""
+    id: int
+    otp: int
+    flow: Literal["register"]   # extensible for future flows (e.g. "login")
+
+
+class ResendOTPRequest(BaseModel):
+    """Payload for POST /api/v1/auth/resendOTP."""
+    id: int
+    flow: Literal["register"]
 
 
 # ── Response Models ────────────────────────────────────────────────────────────
 
+class RegisterResponse(BaseModel):
+    """Returned after successful registration or OTP resend."""
+    userid: int
+    username: str
+    registerMFA: bool
+
+
+class VerifyOTPResponse(BaseModel):
+    """Returned after OTP verification attempt."""
+    status: str                     # "success" | "failed"
+    message: str
+    jwt: Optional[str] = None       # Present only on success
+
+
 class LoginSuccessResponse(BaseModel):
-    """Returned on successful login. Token is delivered via HttpOnly cookie only."""
+    """Returned on successful login."""
+    status: str = "success"
     message: str = "Login successful."
+    jwt: str
     token_type: str = "bearer"
     expires_in_minutes: int
-
-
-class UserResponse(BaseModel):
-    """Returned on successful registration."""
-    user_id: str
-    email: str
-    registered_at: datetime
-    message: str
