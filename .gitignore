@@ -150,3 +150,5 @@ frontend/html/
 index.html
 #venv
 venv
+#_pycache_
+_pycache_/
