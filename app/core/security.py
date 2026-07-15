@@ -95,6 +95,61 @@ def create_access_token(data: dict) -> str:
     return token
 
 
+def create_refresh_token(data: dict) -> str:
+    """Create a signed JWT refresh token.
+
+    The refresh token has a longer expiration (7 days) and specifies the refresh scope.
+    """
+    payload = data.copy()
+    expire = datetime.now(tz=timezone.utc) + timedelta(days=7)
+    payload["exp"] = expire
+    payload["iat"] = datetime.now(tz=timezone.utc)
+    payload["scope"] = "refresh"
+
+    token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    logger.info("Refresh token issued for subject: %s", data.get("sub", "unknown"))
+    return token
+
+
+def create_password_reset_token(user_id: str, username: str) -> str:
+    """Create a temporary password reset token valid for 10 minutes with password_reset scope."""
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "scope": "password_reset"
+    }
+    expire = datetime.now(tz=timezone.utc) + timedelta(minutes=10)
+    payload["exp"] = expire
+    payload["iat"] = datetime.now(tz=timezone.utc)
+
+    token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    logger.info("Password reset token issued for subject: %s", user_id)
+    return token
+
+
+def verify_password_reset_token(token: str) -> dict:
+    """Decode and validate a password reset JWT.
+
+    Returns the decoded payload dict on success.
+    Raises ValueError with a descriptive message if the token is expired,
+    tampered, missing, or does not carry the 'password_reset' scope.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except Exception as exc:
+        raise ValueError(f"Invalid or expired reset token: {exc}") from exc
+
+    if payload.get("scope") != "password_reset":
+        raise ValueError("Token does not carry password_reset scope.")
+
+    return payload
+
+
+
 async def hash_password_async(plain_password: str) -> str:
     """Run hash_password in a separate thread to avoid blocking the event loop."""
     return await asyncio.to_thread(hash_password, plain_password)

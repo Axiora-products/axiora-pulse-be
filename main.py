@@ -94,7 +94,7 @@ def _validate_security_config() -> None:
 _OPENAPI_TAGS = [
     {
         "name": "AI Mentor",
-        "description": "Founder-facing AI Mentor: chat, session inspection, and session reset.",
+        "description": "Founder-facing AI Mentor: chat.",
     },
     {
         "name": "Auth",

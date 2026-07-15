@@ -51,6 +51,21 @@ class User(Base):
     register_otp_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    forgot_password_otp: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    forgot_password_otp_expiry: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    login_otp: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    login_otp_expiry: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r} role={self.role!r}>"

@@ -24,7 +24,12 @@ Acceptance Criteria (from spec):
 import logging
 import re
 
-from app.services.email_service import OTPResult, send_otp_email
+from app.services.email_service import (
+    OTPResult,
+    send_otp_email,
+    send_password_reset_email,
+    send_login_otp_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,3 +114,82 @@ def _mask(identifier: str) -> str:
     if len(identifier) <= 6:
         return "***"
     return identifier[:3] + "***" + identifier[-2:]
+
+
+async def dispatch_password_reset_otp(username: str, otp: int) -> OTPResult:
+    """Dispatch a 6-digit password reset OTP via the appropriate channel."""
+    channel = _detect_channel(username)
+    logger.info("Password reset OTP dispatch → channel=%s for identifier=%s", channel, _mask(username))
+
+    if channel == "email":
+        result = await send_password_reset_email(username, otp)
+
+    elif channel == "phone":
+        # ── SMS stub ────────────────────────────────────────────────────────────
+        logger.warning(
+            "SMS OTP dispatch is not yet configured. "
+            "Phone username: %s", _mask(username)
+        )
+        result = OTPResult(
+            success=False,
+            channel="sms",
+            error=(
+                "SMS delivery is not yet configured. "
+                "Please use an email address."
+            ),
+        )
+
+    else:
+        result = OTPResult(
+            success=False,
+            channel="unknown",
+            error=f"Unrecognised identifier format: {_mask(username)}",
+        )
+
+    if result.success:
+        logger.info("Password reset OTP dispatch SUCCESS → channel=%s", result.channel)
+    else:
+        logger.warning(
+            "Password reset OTP dispatch FAILED → channel=%s | error=%s", result.channel, result.error
+        )
+
+    return result
+
+
+async def dispatch_login_otp(username: str, otp: int) -> OTPResult:
+    """Dispatch a 6-digit login OTP via the appropriate channel."""
+    channel = _detect_channel(username)
+    logger.info("Login OTP dispatch → channel=%s for identifier=%s", channel, _mask(username))
+
+    if channel == "email":
+        result = await send_login_otp_email(username, otp)
+
+    elif channel == "phone":
+        # ── SMS stub ────────────────────────────────────────────────────────────
+        logger.warning(
+            "SMS OTP dispatch is not yet configured. Phone username: %s", _mask(username)
+        )
+        result = OTPResult(
+            success=False,
+            channel="sms",
+            error=(
+                "SMS delivery is not yet configured. Please use an email address."
+            ),
+        )
+
+    else:
+        result = OTPResult(
+            success=False,
+            channel="unknown",
+            error=f"Unrecognised identifier format: {_mask(username)}",
+        )
+
+    if result.success:
+        logger.info("Login OTP dispatch SUCCESS → channel=%s", result.channel)
+    else:
+        logger.warning(
+            "Login OTP dispatch FAILED → channel=%s | error=%s", result.channel, result.error
+        )
+
+    return result
+
