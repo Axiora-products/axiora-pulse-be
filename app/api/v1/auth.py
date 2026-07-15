@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.limiter import limiter
+from app.core.dependencies import get_current_user
 from app.db.database import get_db
+from app.db.models import User
 from app.models.auth_models import (
     LoginSuccessResponse,
     RegisterResponse,
@@ -20,6 +22,17 @@ from app.models.auth_models import (
     UserRegisterRequest,
     VerifyOTPRequest,
     VerifyOTPResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    ForgotPasswordVerifyRequest,
+    ForgotPasswordVerifyResponse,
+    ForgotPasswordResetRequest,
+    ForgotPasswordResetResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
+    LoginOTPResponse,
+    VerifyLoginRequest,
+    VerifyLoginResponse,
 )
 from app.services.auth_service import auth_service
 
@@ -98,13 +111,13 @@ async def resend_otp(
 
 @router.post(
     "/login",
-    response_model=LoginSuccessResponse,
+    response_model=LoginOTPResponse,
     status_code=status.HTTP_200_OK,
-    summary="Login and obtain a JWT access token",
+    summary="Login and request a verification code",
     description=(
         "Authenticates a user with username (email) and password. "
         "Requires that OTP MFA has been completed (registerMFA=True). "
-        "Returns a signed JWT access token in the response body."
+        "Generates and dispatches a login-specific OTP to complete authentication."
     ),
 )
 @limiter.limit("5/minute")
@@ -112,5 +125,119 @@ async def login(
     request: Request,
     payload: UserLoginRequest,
     db: AsyncSession = Depends(get_db),
-) -> LoginSuccessResponse:
+) -> LoginOTPResponse:
     return await auth_service.login(payload, db)
+
+
+# ── Verify Login ───────────────────────────────────────────────────────────────
+
+@router.post(
+    "/verify-login",
+    response_model=VerifyLoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify login OTP and obtain access/refresh tokens",
+    description=(
+        "Accepts user identifier (emailOrMobile) and the 6-digit login OTP. "
+        "On success, invalidates the OTP and returns a signed JWT access/refresh token pair."
+    ),
+)
+@limiter.limit("5/minute")
+async def verify_login(
+    request: Request,
+    payload: VerifyLoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> VerifyLoginResponse:
+    return await auth_service.verify_login(payload, db)
+
+
+
+# ── Forgot Password Request ───────────────────────────────────────────────────
+
+@router.post(
+    "/forgot-password/request",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Request a password reset code",
+    description=(
+        "Accepts user identifier (emailOrMobile). "
+        "Generates a 6-digit OTP code if user exists and dispatches it. "
+        "Returns a generic success response to prevent user enumeration."
+    ),
+)
+@limiter.limit("5/minute")
+async def forgot_password_request(
+    request: Request,
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ForgotPasswordResponse:
+    return await auth_service.forgot_password_request(payload, db)
+
+
+# ── Forgot Password Verify ────────────────────────────────────────────────────
+
+@router.post(
+    "/forgot-password/verify",
+    response_model=ForgotPasswordVerifyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify password reset code",
+    description=(
+        "Accepts user identifier (emailOrMobile) and the reset code. "
+        "Validates code against database. On success, returns a secure 10-minute temporary reset token."
+    ),
+)
+@limiter.limit("5/minute")
+async def forgot_password_verify(
+    request: Request,
+    payload: ForgotPasswordVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ForgotPasswordVerifyResponse:
+    return await auth_service.forgot_password_verify(payload, db)
+
+
+# ── Forgot Password Reset ─────────────────────────────────────────────────────
+
+@router.post(
+    "/forgot-password/reset",
+    response_model=ForgotPasswordResetResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reset password using temporary token",
+    description=(
+        "Accepts the temporary reset token and the new password. "
+        "Validates the token, hashes the new password, updates PostgreSQL, "
+        "and updates password_changed_at to revoke all existing access tokens."
+    ),
+)
+@limiter.limit("3/minute")
+async def forgot_password_reset(
+    request: Request,
+    payload: ForgotPasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ForgotPasswordResetResponse:
+    return await auth_service.forgot_password_reset(payload, db)
+
+
+# ── Change Password (Authenticated) ───────────────────────────────────────────
+
+@router.post(
+    "/change-password",
+    response_model=ChangePasswordResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Change password for authenticated user",
+    description=(
+        "Requires authentication via standard JWT Bearer token. "
+        "Verifies the current password, updates it in PostgreSQL, "
+        "and updates password_changed_at to revoke all other access tokens."
+    ),
+)
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChangePasswordResponse:
+    return await auth_service.change_password(current_user, payload, db)
+
+
+
+
