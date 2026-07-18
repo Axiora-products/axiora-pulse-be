@@ -31,7 +31,13 @@ from app.core.security import (
     create_password_reset_token,
     verify_password_reset_token,
 )
-from app.core.config import settings
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+_ACCESS_TOKEN_MINS = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
 from app.db.models import User
 from app.models.auth_models import (
     LoginSuccessResponse,
@@ -358,7 +364,7 @@ class AuthService:
         return VerifyLoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
-            expires_in_minutes=settings.access_token_expire_minutes,
+            expires_in_minutes=_ACCESS_TOKEN_MINS,
         )
 
     # ── Forgot Password Request ───────────────────────────────────────────────
