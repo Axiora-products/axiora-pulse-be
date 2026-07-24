@@ -24,10 +24,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ── Environment variable helpers ───────────────────────────────────────────────
-_JWT_SECRET_KEY     = os.getenv("JWT_SECRET_KEY", "axiora-pulse-change-this-secret-in-production")
-_JWT_ALGORITHM      = os.getenv("JWT_ALGORITHM", "HS256")
-_ACCESS_TOKEN_MINS  = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
-_OTP_EXPIRE_MINS    = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
+_JWT_SECRET_KEY     = os.getenv("JWT_SECRET_KEY")
+_JWT_ALGORITHM      = os.getenv("JWT_ALGORITHM")
+_ACCESS_TOKEN_MINS  = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+_OTP_EXPIRE_MINS    = int(os.getenv("OTP_EXPIRE_MINUTES"))
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 _HASH_ITERATIONS = 260_000  # OWASP recommended iteration count for PBKDF2-SHA256

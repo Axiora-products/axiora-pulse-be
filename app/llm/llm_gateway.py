@@ -61,7 +61,7 @@ def get_llm_gateway(provider: Optional[str] = None) -> LLMGateway:
 
     load_dotenv()
     logger = logging.getLogger(__name__)
-    provider = provider or os.getenv("DEFAULT_PROVIDER", "huggingface")
+    provider = provider or os.getenv("DEFAULT_PROVIDER")
 
     # Dynamic fallback: if HuggingFace is selected but token is missing,
     # and we have an OpenAI API key, fallback to OpenAI.
