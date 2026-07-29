@@ -191,10 +191,12 @@ app.add_middleware(
 
 
 # ── Routers ────────────────────────────────────────────────────────────────────
+from app.api.v1 import admin as admin_router
 from app.api.v1 import orchestration as orchestration_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import workspace as workspace_router
 
+app.include_router(admin_router.router, prefix="/api/v1")
 app.include_router(orchestration_router.router, prefix="/api/v1")
 app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(workspace_router.router, prefix="/api/v1")
