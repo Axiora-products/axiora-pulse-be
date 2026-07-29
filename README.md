@@ -252,6 +252,24 @@ All endpoints are prefixed with `/api/v1`. Authentication uses **JWT Bearer toke
 | `POST` | `/api/v1/auth/forgot-password/reset` | ❌ | Set a new password using the `reset_token`. |
 | `POST` | `/api/v1/auth/change-password` | ✅ | Change password for the authenticated user. Revokes all existing sessions. |
 
+### Admin Endpoints
+
+All admin routes require an active account with the `admin` role.
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/v1/admin/dashboard` | Account and workspace metrics, plus recent workspaces. |
+| `GET` | `/api/v1/admin/users` | Paginated user list; accepts `search`, `limit`, and `offset`. |
+| `GET` | `/api/v1/admin/users/{user_id}` | User detail and workspace count. |
+| `PATCH` | `/api/v1/admin/users/{user_id}` | Change `role` and/or suspend/reactivate with `is_active`. |
+| `GET` | `/api/v1/admin/workspaces` | Paginated cross-user workspace review; accepts `user_id` and `search`. |
+| `GET` | `/api/v1/admin/workspaces/{workspace_id}` | Full workspace state for support/review; access is audited. |
+| `GET` | `/api/v1/admin/interactive-questions` | List all managed onboarding questions. |
+| `POST` | `/api/v1/admin/interactive-questions` | Create an onboarding question. |
+| `PUT` | `/api/v1/admin/interactive-questions/{question_id}` | Update a question, its options, status, or ordering. |
+| `DELETE` | `/api/v1/admin/interactive-questions/{question_id}` | Delete an onboarding question. |
+| `GET` | `/api/v1/admin/audit-events` | Paginated administrative audit trail; can filter by `action`. |
+
 #### Token Response Shape (register & login)
 ```json
 {

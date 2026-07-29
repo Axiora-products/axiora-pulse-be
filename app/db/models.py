@@ -47,6 +47,9 @@ class User(Base):
     password_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     login_otp: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
@@ -72,6 +75,12 @@ class InteractiveQuestionnaire(Base):
     )
     optional: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
     )
     answers: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
@@ -162,6 +171,21 @@ class Workspace(Base):
 
     def __repr__(self) -> str:
         return f"<Workspace id={self.id} name={self.name!r} user_id={self.user_id} state={self.state!r}>"
+
+
+class AuditEvent(Base):
+    """Append-only record of an administrative action."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
 
 
 # Compatibility aliases

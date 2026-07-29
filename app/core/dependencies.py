@@ -79,7 +79,7 @@ async def get_current_user(
         raise credentials_exc
 
     # Reject password-reset scoped tokens — they must not grant access.
-    if payload.get("scope") == "password_reset":
+    if payload.get("scope") in {"password_reset", "refresh"}:
         raise credentials_exc
 
     # ── Load user ──────────────────────────────────────────────────────────────
@@ -87,6 +87,12 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exc
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been suspended.",
+        )
 
     # ── Revocation check (password_changed_at) ─────────────────────────────────
     # If the user changed their password, any token issued before that moment
@@ -113,3 +119,13 @@ async def get_current_user(
             )
 
     return user
+
+
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Require a currently active user with the admin role."""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges are required.",
+        )
+    return current_user
