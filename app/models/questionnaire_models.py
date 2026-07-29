@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SubmitQuestionRequest(BaseModel):
@@ -34,6 +34,24 @@ class InteractiveQuestionnaireResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SubmitAnswersRequestItem(BaseModel):
+    """Payload item for submitting questionnaire answers."""
+
+    questionnaire_id: int = Field(..., ge=1, description="Questionnaire template identifier")
+    user_answers: list[str] = Field(default_factory=list, description="User answers for the questionnaire")
+
+    @field_validator("user_answers")
+    @classmethod
+    def validate_user_answers(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item is not None and str(item).strip() != ""]
+
+
+class SubmitAnswersResponse(BaseModel):
+    """Response returned after saving questionnaire answers."""
+
+    message: str
 
 
 class DeleteQuestionResponse(BaseModel):

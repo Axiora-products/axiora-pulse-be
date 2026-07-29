@@ -1,10 +1,4 @@
-"""
-app/db/models.py
-────────────────────────────────────────────────────────────────────────────────
-SQLAlchemy ORM models for:
-  - User table
-  - Workspace table (includes name, description, mentor state, conversation history, and validation engine outputs)
-"""
+"""SQLAlchemy ORM models for users, questionnaire templates, and workspace data."""
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON
