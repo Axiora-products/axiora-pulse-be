@@ -64,6 +64,69 @@ class User(Base):
         return f"<User id={self.id} username={self.username!r} role={self.role!r}>"
 
 
+class InteractiveQuestionnaire(Base):
+    """Admin-defined question template for interactive questionnaires."""
+
+    __tablename__ = "interactive_questionnaires"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    optional: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    answers: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<InteractiveQuestionnaire id={self.id} answer_type={self.answer_type!r}>"
+
+
+class UserInteractiveQuestionnaire(Base):
+    """Stores a user's responses to a questionnaire template."""
+
+    __tablename__ = "user_interactive_questionnaires"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    questionnaire_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("interactive_questionnaires.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_answers: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    submission_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserInteractiveQuestionnaire id={self.id} user_id={self.user_id} questionnaire_id={self.questionnaire_id}>"
+
+
 class Workspace(Base):
     """
     Persisted Workspace record — scoped to a user.
