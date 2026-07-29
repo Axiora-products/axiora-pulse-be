@@ -14,6 +14,27 @@ Non-admin users receive `403`. Suspended users (`is_active: false`) also receive
 
 ## Endpoints
 
+### User questionnaire API
+
+The normal-user onboarding flow now uses a separate public authenticated API:
+
+| Operation | Route |
+|---|---|
+| Fetch active onboarding questions | `GET /api/v1/questionnaire/questions` |
+| Create or update a user's answers | `POST /api/v1/questionnaire/submit-answers` |
+
+Only active questions are returned and validated. Questions are returned in `sort_order`, then ID order. Deactivating a required question therefore removes it from both the UI and the submission requirements.
+
+The public API uses the existing storage contract: `answer_type`, `optional`, and `answers`. Its type mapping to the admin UI contract is documented below. Use `questionnaire_id` and `user_answers` for submissions:
+
+```json
+[
+  { "questionnaire_id": 101, "user_answers": ["Founder"] }
+]
+```
+
+Submitting an existing answer for the same user/question updates it rather than creating a duplicate.
+
 ### Dashboard
 
 `GET /api/v1/admin/dashboard`

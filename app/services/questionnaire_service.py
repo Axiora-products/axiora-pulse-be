@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 
 class QuestionnaireService:
     async def list_questions(self, db: AsyncSession) -> list[InteractiveQuestionnaireResponse]:
-        """Retrieve all questionnaire questions ordered by id ascending."""
+        """Retrieve active onboarding questions in their admin-defined order."""
         result = await db.execute(
-            select(InteractiveQuestionnaire).order_by(InteractiveQuestionnaire.id.asc())
+            select(InteractiveQuestionnaire)
+            .where(InteractiveQuestionnaire.is_active.is_(True))
+            .order_by(InteractiveQuestionnaire.sort_order.asc(), InteractiveQuestionnaire.id.asc())
         )
         questions = result.scalars().all()
         return [InteractiveQuestionnaireResponse.model_validate(question) for question in questions]
@@ -40,8 +42,11 @@ class QuestionnaireService:
                 detail="At least one questionnaire answer item is required.",
             )
 
-        # Fetch all questions from the database
-        all_questions_result = await db.execute(select(InteractiveQuestionnaire))
+        # Inactive questions are not visible to users and must not be required
+        # or accepted as part of a user's onboarding submission.
+        all_questions_result = await db.execute(
+            select(InteractiveQuestionnaire).where(InteractiveQuestionnaire.is_active.is_(True))
+        )
         all_questionnaires = all_questions_result.scalars().all()
         questionnaire_map = {q.id: q for q in all_questionnaires}
 
