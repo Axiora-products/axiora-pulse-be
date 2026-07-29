@@ -32,7 +32,7 @@ class QuestionnaireService:
         current_user: User,
         db: AsyncSession,
     ) -> SubmitAnswersResponse:
-        """Persist user questionnaire answers inside a transactional block."""
+        """Persist user questionnaire answers inside a single transaction."""
         if not payload:
             logger.warning("Questionnaire submission rejected for user_id=%s: empty payload", current_user.id)
             raise HTTPException(
@@ -40,63 +40,127 @@ class QuestionnaireService:
                 detail="At least one questionnaire answer item is required.",
             )
 
-        questionnaire_ids = [item.questionnaire_id for item in payload]
-        result = await db.execute(
-            select(InteractiveQuestionnaire).where(InteractiveQuestionnaire.id.in_(questionnaire_ids))
-        )
-        existing_questions = {question.id: question for question in result.scalars().all()}
+        # Fetch all questions from the database
+        all_questions_result = await db.execute(select(InteractiveQuestionnaire))
+        all_questionnaires = all_questions_result.scalars().all()
+        questionnaire_map = {q.id: q for q in all_questionnaires}
 
-        if len(existing_questions) != len(questionnaire_ids):
-            missing_ids = sorted(set(questionnaire_ids) - set(existing_questions))
-            logger.warning(
-                "Questionnaire submission failed for user_id=%s: missing questionnaire ids %s",
-                current_user.id,
-                missing_ids,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Questionnaire(s) not found: {missing_ids}",
-            )
-
+        # Check if all submitted questionnaire IDs exist
+        payload_map = {}
         for item in payload:
-            question = existing_questions[item.questionnaire_id]
-            if not question.optional and not any(
-                isinstance(answer, str) and answer.strip() for answer in item.user_answers
-            ):
+            if item.questionnaire_id not in questionnaire_map:
                 logger.warning(
-                    "Questionnaire submission failed for user_id=%s: mandatory question %s missing answer",
+                    "Questionnaire submission failed for user_id=%s: questionnaire id %s not found",
                     current_user.id,
                     item.questionnaire_id,
                 )
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Questionnaire {item.questionnaire_id} requires at least one non-empty answer.",
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Questionnaire(s) not found: {[item.questionnaire_id]}",
                 )
+            payload_map[item.questionnaire_id] = item
+
+        # Validate that all required/mandatory questions are answered
+        for q_id, questionnaire in questionnaire_map.items():
+            if not questionnaire.optional:
+                # If required, it must be in the payload
+                if q_id not in payload_map:
+                    logger.warning(
+                        "Questionnaire submission failed for user_id=%s: mandatory question %s missing from payload",
+                        current_user.id,
+                        q_id,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Questionnaire {q_id} requires a submission entry.",
+                    )
+                
+                # And the answers must not be empty
+                item = payload_map[q_id]
+                if not item.user_answers or not any(answer.strip() for answer in item.user_answers):
+                    logger.warning(
+                        "Questionnaire submission failed for user_id=%s: mandatory question %s missing answer",
+                        current_user.id,
+                        q_id,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Questionnaire {q_id} requires at least one non-empty answer.",
+                    )
+
+            # Validate answers for choice-based questions if present in payload
+            if q_id in payload_map:
+                item = payload_map[q_id]
+                if questionnaire.answer_type in {"radiobuttons", "dropdown"}:
+                    if len(item.user_answers) > 1:
+                        logger.warning(
+                            "Questionnaire submission failed for user_id=%s: single-choice question %s has multiple answers",
+                            current_user.id,
+                            q_id,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Questionnaire {q_id} only accepts a single choice answer.",
+                        )
+                
+                if questionnaire.answer_type in {"radiobuttons", "dropdown", "checkboxes"}:
+                    allowed_options = set(questionnaire.answers)
+                    for ans in item.user_answers:
+                        if ans not in allowed_options:
+                            logger.warning(
+                                "Questionnaire submission failed for user_id=%s: answer %r not allowed for question %s",
+                                current_user.id,
+                                ans,
+                                q_id,
+                            )
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Answer '{ans}' is not a valid option for question {q_id}.",
+                            )
+
+        # Query existing answers for this user to avoid duplicates
+        existing_answers_query = await db.execute(
+            select(UserInteractiveQuestionnaire).where(
+                UserInteractiveQuestionnaire.user_id == current_user.id
+            )
+        )
+        existing_answers = {
+            ans.questionnaire_id: ans for ans in existing_answers_query.scalars().all()
+        }
 
         try:
-            async with db.begin():
-                for item in payload:
-                    response = UserInteractiveQuestionnaire(
+            for item in payload_map.values():
+                q_id = item.questionnaire_id
+                now = datetime.now(timezone.utc)
+                if q_id in existing_answers:
+                    # Update the existing record instead of inserting a duplicate
+                    ans_record = existing_answers[q_id]
+                    ans_record.user_answers = list(item.user_answers)
+                    ans_record.updated_at = now
+                    ans_record.submission_date = now
+                else:
+                    # Create a new record
+                    ans_record = UserInteractiveQuestionnaire(
                         user_id=current_user.id,
-                        questionnaire_id=item.questionnaire_id,
+                        questionnaire_id=q_id,
                         user_answers=list(item.user_answers),
-                        submission_date=datetime.now(timezone.utc),
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc),
+                        submission_date=now,
+                        created_at=now,
+                        updated_at=now,
                     )
-                    db.add(response)
+                    db.add(ans_record)
+            await db.flush()
         except Exception:
             logger.exception(
                 "Database transaction failed while saving questionnaire answers for user_id=%s",
                 current_user.id,
             )
-            await db.rollback()
             raise
 
         logger.info(
             "Questionnaire answers submitted: user_id=%s count=%s",
             current_user.id,
-            len(payload),
+            len(payload_map),
         )
         return SubmitAnswersResponse(message="Questionnaire answers submitted successfully.")
 
@@ -155,7 +219,7 @@ class QuestionnaireService:
             )
 
         await db.delete(questionnaire)
-        await db.commit()
+        await db.flush()
 
         logger.info(
             "Questionnaire question deleted: id=%s by admin_user_id=%s",
