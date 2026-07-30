@@ -749,6 +749,19 @@ class AuthService:
                 detail="User not found."
             )
 
+        token_iat = payload.get("iat")
+        password_changed_at = user.password_changed_at
+        if password_changed_at is not None and token_iat is not None:
+            if password_changed_at.tzinfo is None:
+                password_changed_at = password_changed_at.replace(tzinfo=timezone.utc)
+            token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+            if token_issued_at <= password_changed_at:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired reset token.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
         # 3. Hash new password and update record
         user.password = await hash_password_async(request.new_password)
 
