@@ -3,7 +3,7 @@ from datetime import datetime
 import uuid
 
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, JSON
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, JSON
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
