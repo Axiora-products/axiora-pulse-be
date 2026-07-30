@@ -78,8 +78,8 @@ async def get_current_user(
     if user_id is None:
         raise credentials_exc
 
-    # Reject password-reset scoped tokens — they must not grant access.
-    if payload.get("scope") == "password_reset":
+    # Refresh and password-reset scoped tokens must never grant API access.
+    if payload.get("scope") in {"password_reset", "refresh"}:
         raise credentials_exc
 
     # ── Load user ──────────────────────────────────────────────────────────────
