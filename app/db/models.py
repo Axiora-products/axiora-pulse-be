@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for users, questionnaire templates, and workspace data."""
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -62,6 +62,12 @@ class InteractiveQuestionnaire(Base):
     """Admin-defined question template for interactive questionnaires."""
 
     __tablename__ = "interactive_questionnaires"
+    __table_args__ = (
+        CheckConstraint(
+            "answer_type IN ('textarea', 'radiobuttons', 'checkboxes', 'dropdown')",
+            name="ck_interactive_questionnaires_answer_type",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True, index=True
@@ -91,6 +97,13 @@ class UserInteractiveQuestionnaire(Base):
     """Stores a user's responses to a questionnaire template."""
 
     __tablename__ = "user_interactive_questionnaires"
+    __table_args__ = (
+        Index(
+            "ix_user_interactive_questionnaires_user_id_questionnaire_id",
+            "user_id",
+            "questionnaire_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True, index=True

@@ -2,6 +2,7 @@ import os
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from httpx import AsyncClient, ASGITransport
 
@@ -30,10 +31,34 @@ TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:
 async def test_engine():
     # Prefer a PostgreSQL test database when TEST_DATABASE_URL is provided.
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    if TEST_DATABASE_URL.startswith("sqlite"):
+        @event.listens_for(engine.sync_engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()
+
+@pytest_asyncio.fixture
+async def db_transaction_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+    async with test_engine.connect() as connection:
+        transaction = await connection.begin()
+        async_session = async_sessionmaker(
+            bind=connection, class_=AsyncSession, expire_on_commit=False
+        )
+        async with async_session() as session:
+            try:
+                yield session
+            finally:
+                if session.in_transaction():
+                    await session.rollback()
+                await session.close()
+                if transaction.is_active:
+                    await transaction.rollback()
 
 @pytest_asyncio.fixture
 async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
@@ -42,6 +67,7 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     )
     async with async_session() as session:
         yield session
+        await session.rollback()
         # Clear out tables after each test to ensure test isolation
         for table in reversed(Base.metadata.sorted_tables):
             await session.execute(table.delete())

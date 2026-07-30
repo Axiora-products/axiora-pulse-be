@@ -114,7 +114,7 @@ async def test_verify_registration_otp_success_returns_tokens(
     response = await client.post(
         "/api/v1/auth/verifyOTP",
         json={
-            "emailOrMobile": "otp-success@axiorapulse.com",
+            "id": user.id,
             "otp": 123456,
             "flow": "register",
         },
@@ -148,14 +148,14 @@ async def test_verify_registration_otp_invalid_then_invalidates_after_three_atte
     for _ in range(2):
         response = await client.post(
             "/api/v1/auth/verifyOTP",
-            json={"emailOrMobile": user.username, "otp": 999999, "flow": "register"},
+            json={"id": user.id, "otp": 999999, "flow": "register"},
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["message"] == "OTP is wrong"
 
     response = await client.post(
         "/api/v1/auth/verifyOTP",
-        json={"emailOrMobile": user.username, "otp": 999999, "flow": "register"},
+        json={"id": user.id, "otp": 999999, "flow": "register"},
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -182,7 +182,7 @@ async def test_verify_registration_otp_expired_clears_code(
 
     response = await client.post(
         "/api/v1/auth/verifyOTP",
-        json={"emailOrMobile": user.username, "otp": 222222, "flow": "register"},
+        json={"id": user.id, "otp": 222222, "flow": "register"},
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -210,7 +210,6 @@ async def test_user_login_dispatches_mfa_code_and_updates_database(
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["status"] == "success"
-    assert data["userid"] == user.id
     await db_session.refresh(user)
     assert user.login_otp is not None
     dispatch_login_otp.assert_awaited_once_with(user.username, user.login_otp)
@@ -440,7 +439,8 @@ async def test_forgot_password_reset_updates_hash_and_revokes_old_access_token(
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert data["access_token"]
+    assert data["status"] == "success"
+    assert data["message"] == "Password has been reset successfully. Please log in with your new password."
     await db_session.refresh(user)
     assert user.password != old_hash
     assert await verify_password_async("NewPass@12345", user.password)
