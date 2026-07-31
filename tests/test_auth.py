@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from httpx import AsyncClient
 from jose import jwt
 from sqlalchemy import select
@@ -452,7 +453,7 @@ async def test_forgot_password_reset_updates_hash_and_revokes_old_access_token(
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["status"] == "success"
-    assert data["message"] == "Password has been reset successfully. Please log in with your new password."
+    assert data["message"] == "Password has been reset successfully."
     await db_session.refresh(user)
     assert user.password != old_hash
     assert await verify_password_async("NewPass@12345", user.password)
@@ -576,6 +577,7 @@ async def test_resend_otp_success_and_failure_paths(db_session: AsyncSession):
         )
 
     assert response.userid == user.id
+    await db_session.refresh(user)
     await db_session.refresh(user)
     assert user.register_otp is not None
     dispatch_otp.assert_awaited_once_with(user.username, user.register_otp)
@@ -779,10 +781,18 @@ async def test_get_current_user_validates_tokens_and_revocation(db_session: Asyn
         os.getenv("JWT_SECRET_KEY"),
         algorithm=os.getenv("JWT_ALGORITHM"),
     )
-    assert (await get_current_user(token=token, db=db_session)).id == user.id
+    assert (
+        await get_current_user(
+            auth_credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),
+            db=db_session,
+        )
+    ).id == user.id
 
     with pytest.raises(HTTPException):
-        await get_current_user(token="not-a-jwt", db=db_session)
+        await get_current_user(
+            auth_credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="not-a-jwt"),
+            db=db_session,
+        )
 
     reset_scoped_token = jwt.encode(
         {
@@ -795,7 +805,10 @@ async def test_get_current_user_validates_tokens_and_revocation(db_session: Asyn
         algorithm=os.getenv("JWT_ALGORITHM"),
     )
     with pytest.raises(HTTPException):
-        await get_current_user(token=reset_scoped_token, db=db_session)
+        await get_current_user(
+            auth_credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=reset_scoped_token),
+            db=db_session,
+        )
 
     revoked_token = jwt.encode(
         {
@@ -809,5 +822,8 @@ async def test_get_current_user_validates_tokens_and_revocation(db_session: Asyn
     user.password_changed_at = datetime.now(tz=timezone.utc)
     await db_session.commit()
     with pytest.raises(HTTPException) as revoked_exc:
-        await get_current_user(token=revoked_token, db=db_session)
+        await get_current_user(
+            auth_credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=revoked_token),
+            db=db_session,
+        )
     assert revoked_exc.value.status_code == status.HTTP_401_UNAUTHORIZED

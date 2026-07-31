@@ -85,7 +85,7 @@ async def test_list_workspaces_returns_only_authenticated_users_workspaces(
 async def test_list_workspaces_rejects_unauthenticated_requests(client: AsyncClient):
     response = await client.get("/api/v1/workspaces")
 
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio

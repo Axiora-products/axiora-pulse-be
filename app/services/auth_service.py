@@ -439,6 +439,7 @@ class AuthService:
             user.register_otp_attempts = 0
 
             logger.info("Register OTP regenerated for user id=%s (%s)", user.id, user.username)
+            await db.flush()
 
             result = await dispatch_otp(user.username, otp)
             if not result.success:
