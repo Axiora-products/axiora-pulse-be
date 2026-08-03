@@ -228,6 +228,9 @@ class Workspace(Base):
     validation_result: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
+    is_delete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
@@ -236,7 +239,7 @@ class Workspace(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Workspace id={self.id} name={self.name!r} user_id={self.user_id} state={self.state!r}>"
+        return f"<Workspace id={self.id} name={self.name!r} user_id={self.user_id} state={self.state!r} is_delete={self.is_delete}>"
 
 
 # ── Section 11: Core Orchestration Data Models (8 Tables) ─────────────────────
