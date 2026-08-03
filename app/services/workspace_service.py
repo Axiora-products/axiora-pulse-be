@@ -180,7 +180,15 @@ class WorkspaceService:
         db: AsyncSession,
     ) -> DeleteWorkspaceResponse:
         """Soft-delete (archive) a workspace by setting is_delete=True — 404/403 enforced."""
-        workspace = await self._fetch_owned_workspace(workspace_id, current_user, db)
+        workspace = await self._fetch_owned_workspace(
+            workspace_id, current_user, db, require_active=False
+        )
+
+        if workspace.is_delete:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Workspace {workspace_id} is already archived.",
+            )
 
         workspace.is_delete = True
         workspace.updated_at = datetime.now(timezone.utc)
@@ -201,7 +209,15 @@ class WorkspaceService:
         db: AsyncSession,
     ) -> RestoreWorkspaceResponse:
         """Restore an archived workspace by setting is_delete=False — 404/403 enforced."""
-        workspace = await self._fetch_owned_workspace(workspace_id, current_user, db)
+        workspace = await self._fetch_owned_workspace(
+            workspace_id, current_user, db, require_active=False
+        )
+
+        if not workspace.is_delete:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Workspace {workspace_id} is not archived.",
+            )
 
         workspace.is_delete = False
         workspace.updated_at = datetime.now(timezone.utc)
@@ -350,8 +366,14 @@ class WorkspaceService:
         workspace_id: int,
         current_user: User,
         db: AsyncSession,
+        require_active: bool = True,
     ) -> Workspace:
-        """Fetch a workspace and enforce ownership."""
+        """Fetch a workspace and enforce ownership.
+
+        By default, archived workspaces (is_delete=True) are treated as not found —
+        callers that need to see archived workspaces (delete-already-archived check,
+        restore, list-archived) must pass require_active=False explicitly.
+        """
         result = await db.execute(
             select(Workspace).where(Workspace.id == workspace_id)
         )
@@ -367,6 +389,12 @@ class WorkspaceService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to access this workspace.",
+            )
+
+        if require_active and workspace.is_delete:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workspace {workspace_id} not found.",
             )
 
         return workspace
