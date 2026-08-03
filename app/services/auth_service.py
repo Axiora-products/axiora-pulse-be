@@ -207,6 +207,9 @@ class AuthService:
         Raises:
             HTTPException 409 if the username is already registered.
         """
+        if isinstance(request, dict):
+            request = UserRegisterRequest(**request)
+
         username = request.username.lower().strip()
 
         existing = await _get_user_by_username(db, username)
@@ -429,11 +432,10 @@ class AuthService:
 
             otp = generate_otp()
             expiry = otp_expiry()
-
             user.login_otp = otp
             user.login_otp_expiry = expiry
-
             logger.info("Login OTP regenerated for user id=%s (%s)", user.id, user.username)
+            await db.flush()
 
             result = await dispatch_login_otp(user.username, otp)
             if not result.success:
@@ -460,6 +462,7 @@ class AuthService:
             user.register_otp_attempts = 0
 
             logger.info("Register OTP regenerated for user id=%s (%s)", user.id, user.username)
+            await db.flush()
 
             result = await dispatch_otp(user.username, otp)
             if not result.success:
@@ -663,6 +666,7 @@ class AuthService:
         user.forgot_password_otp_expiry = expiry
 
         logger.info("Forgot password OTP generated for user id=%s (%s)", user.id, user.username)
+        await db.flush()
 
         # Dispatch OTP
         result = await dispatch_password_reset_otp(username, otp)
