@@ -204,20 +204,38 @@ async def test_workspace_owner_can_get_update_and_delete_workspace(
 ):
     owner = await create_test_user(db_session, username="workspace-owner-ok@axiorapulse.com")
     workspace = await create_workspace(db_session, user_id=owner.id, name="Original")
+    workspace_id = workspace.id
     authenticate_as(owner)
 
-    get_response = await client.get(f"/api/v1/workspaces/{workspace.id}")
+    get_response = await client.get(f"/api/v1/workspaces/{workspace_id}")
     assert get_response.status_code == status.HTTP_200_OK
-    assert get_response.json()["id"] == workspace.id
+    assert get_response.json()["id"] == workspace_id
 
     update_response = await client.put(
-        f"/api/v1/workspaces/{workspace.id}",
+        f"/api/v1/workspaces/{workspace_id}",
         json={"name": "Updated", "description": None},
     )
     assert update_response.status_code == status.HTTP_200_OK
     assert update_response.json()["name"] == "Updated"
     assert update_response.json()["description"] is None
 
-    delete_response = await client.delete(f"/api/v1/workspaces/{workspace.id}")
-    assert delete_response.status_code == status.HTTP_204_NO_CONTENT
-    assert await db_session.get(Workspace, workspace.id) is None
+    delete_response = await client.delete(f"/api/v1/workspaces/{workspace_id}")
+    assert delete_response.status_code == status.HTTP_200_OK
+    assert delete_response.json()["is_delete"] is True
+
+    result = await db_session.execute(select(Workspace).where(Workspace.id == workspace_id))
+    archived = result.scalar_one_or_none()
+    assert archived is not None
+    assert archived.is_delete is True
+
+    # Archived workspaces are no longer accessible via normal reads.
+    get_after_delete = await client.get(f"/api/v1/workspaces/{workspace_id}")
+    assert get_after_delete.status_code == status.HTTP_404_NOT_FOUND
+
+    restore_response = await client.patch(f"/api/v1/workspaces/{workspace_id}/restore")
+    assert restore_response.status_code == status.HTTP_200_OK
+    assert restore_response.json()["is_delete"] is False
+
+    result = await db_session.execute(select(Workspace).where(Workspace.id == workspace_id))
+    restored = result.scalar_one_or_none()
+    assert restored.is_delete is False
