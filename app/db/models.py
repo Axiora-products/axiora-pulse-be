@@ -84,6 +84,42 @@ class RefreshSession(Base):
     )
 
 
+class AuthActions(Base):
+    """Per-user auth-gate flags returned on every successful regular-user login.
+
+    payment              – True  → user has completed payment (default: True)
+    interactive_questions – False → user has not yet answered onboarding questions (default: False)
+    """
+
+    __tablename__ = "auth_actions"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, unique=True, index=True
+    )
+    payment: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    interactive_questions: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AuthActions user_id={self.user_id} "
+            f"payment={self.payment} interactive_questions={self.interactive_questions}>"
+        )
+
+
 class InteractiveQuestionnaire(Base):
     """Admin-defined question template for interactive questionnaires."""
 

@@ -40,9 +40,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _ACCESS_TOKEN_MINS = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
-from app.db.models import RefreshSession, User
+from app.db.models import AuthActions, RefreshSession, User
 from app.models.auth_models import (
     AdminLoginResponse,
+    AuthActionsData,
     LoginSuccessResponse,
     RegisterResponse,
     ResendOTPRequest,
@@ -172,6 +173,23 @@ async def _issue_token_pair(user: User, db: AsyncSession) -> tuple[str, str]:
     db.add(RefreshSession(id=session_id, user_id=user.id, expires_at=datetime.now(tz=timezone.utc) + timedelta(days=7)))
     await db.flush()
     return access_token, refresh_token
+
+
+async def _get_or_create_auth_actions(user_id: int, db: AsyncSession) -> AuthActions:
+    """Fetch the auth_actions row for a user, creating it with defaults on first login.
+
+    Defaults:
+        payment              = True   (assume payment completed)
+        interactive_questions = False  (onboarding not yet completed)
+    """
+    result = await db.execute(select(AuthActions).where(AuthActions.user_id == user_id))
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = AuthActions(user_id=user_id, payment=True, interactive_questions=False)
+        db.add(row)
+        await db.flush()
+        logger.info("Created auth_actions row for user_id=%s with defaults.", user_id)
+    return row
 
 
 # ── Auth Service ───────────────────────────────────────────────────────────────
@@ -311,6 +329,7 @@ class AuthService:
             access_token, refresh_token = await _issue_token_pair(user, db)
             logger.info("Login OTP verified via verify_otp for user id=%s (%s)", user.id, user.username)
 
+            auth_actions_row = await _get_or_create_auth_actions(user.id, db)
             actions = ["dashboard"] if user.role == "admin" else []
             return VerifyOTPResponse(
                 status="success",
@@ -321,6 +340,10 @@ class AuthService:
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
                 role=user.role,
                 actions=actions,
+                auth_actions=AuthActionsData(
+                    payment=auth_actions_row.payment,
+                    interactive_questions=auth_actions_row.interactive_questions,
+                ),
             )
 
         else:  # flow == "register"
@@ -559,13 +582,18 @@ class AuthService:
 
         logger.info("Login OTP successfully verified for user id=%s. Access and Refresh tokens issued.", user.id)
 
-        actions = ["dashboard"] if user.role == "admin" else []
+        auth_actions_row = await _get_or_create_auth_actions(user.id, db)
+        actions = []
         return VerifyLoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in_minutes=_ACCESS_TOKEN_MINS,
             role=user.role,
             actions=actions,
+            auth_actions=AuthActionsData(
+                payment=auth_actions_row.payment,
+                interactive_questions=auth_actions_row.interactive_questions,
+            ),
         )
 
     # ── Admin Login ────────────────────────────────────────────────────────────
