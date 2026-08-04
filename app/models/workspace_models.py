@@ -97,3 +97,29 @@ class DeleteWorkspaceResponse(BaseModel):
     status: str = "success"
     message: str = "Workspace deleted successfully."
     workspace_id: int
+
+
+class WorkspaceSurveyQuestionItem(BaseModel):
+    """Individual question item for editing workspace survey questions."""
+    question_text: str = Field(..., min_length=1, description="Text of the survey question")
+    question_type: str = Field(default="open_ended", description="Question input style: multiple_choice | open_ended | rating_scale | etc.")
+    target_hypothesis: Optional[str] = Field(default=None, description="Assumption or pain point tested by this question")
+    options: Optional[List[str]] = Field(default=None, description="Answer options for choice-based questions")
+
+
+class UpdateWorkspaceSurveyQuestionsRequest(BaseModel):
+    """Payload for PUT /api/v1/workspaces/{id}/survey/questions."""
+    survey_title: Optional[str] = Field(None, description="Updated title for the survey")
+    survey_objective: Optional[str] = Field(None, description="Updated objective for the survey")
+    questions: List[WorkspaceSurveyQuestionItem] = Field(..., description="Full list of customized survey questions")
+
+
+class UpdateWorkspaceSurveyQuestionsResponse(BaseModel):
+    """Returned after a user updates their workspace survey questions."""
+    status: str = "success"
+    message: str = "Workspace survey questions updated successfully."
+    workspace_id: int
+    survey_title: Optional[str] = None
+    survey_objective: Optional[str] = None
+    questions: List[Dict[str, Any]]
+

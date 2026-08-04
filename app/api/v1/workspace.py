@@ -34,6 +34,8 @@ from app.models.workspace_models import (
     CreateWorkspaceRequest,
     ExportWorkspaceReportRequest,
     UpdateWorkspaceRequest,
+    UpdateWorkspaceSurveyQuestionsRequest,
+    UpdateWorkspaceSurveyQuestionsResponse,
     WorkspaceChatRequest,
     WorkspaceChatResponse,
     WorkspaceListResponse,
@@ -252,6 +254,31 @@ async def export_workspace_report(
         workspace_id=workspace_id,
         agent_name=payload.agent_name,
         export_format=payload.format,
+        current_user=current_user,
+        db=db
+    )
+
+
+# ── Update Workspace Survey Questions (User Session) ─────────────────────────
+
+@router.put(
+    "/{workspace_id}/survey/questions",
+    response_model=UpdateWorkspaceSurveyQuestionsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update survey questions for a workspace during active user session",
+    description="Allows regular logged-in users to edit, reorder, or customize the survey questions created for their workspace.",
+)
+@limiter.limit("30/minute")
+async def update_workspace_survey_questions(
+    request: Request,
+    workspace_id: int,
+    payload: UpdateWorkspaceSurveyQuestionsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UpdateWorkspaceSurveyQuestionsResponse:
+    return await workspace_service.update_workspace_survey_questions(
+        workspace_id=workspace_id,
+        payload=payload,
         current_user=current_user,
         db=db
     )
