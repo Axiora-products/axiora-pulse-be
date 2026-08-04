@@ -4,9 +4,9 @@ app/models/survey_models.py
 Pydantic request/response models for Survey endpoints.
 
 Endpoints covered:
-  POST /api/v1/surveys/saveAllSurveyQuestions  → SaveAllSurveyQuestionsRequest → SurveyResponse
-  GET  /api/v1/surveys/getAllSurveys           → SurveyListResponse
-  PUT  /api/v1/surveys/updateSurvey            → UpdateSurveyRequest → SurveyResponse
+  POST /api/v1/surveys                → SaveAllSurveyQuestionsRequest → SurveyResponse
+  GET  /api/v1/surveys                → SurveyListResponse
+  PUT  /api/v1/surveys/{survey_id}    → UpdateSurveyRequest → SurveyResponse
 """
 from datetime import datetime
 from typing import List, Literal, Optional
@@ -36,8 +36,7 @@ class SaveAllSurveyQuestionsRequest(BaseModel):
 
 
 class UpdateSurveyRequest(BaseModel):
-    """Payload for PUT /api/v1/surveys/updateSurvey."""
-    surveyId: int = Field(..., ge=1, description="ID of the survey to update")
+    """Payload for PUT /api/v1/surveys/{survey_id}."""
     userId: int = Field(..., ge=1, description="Owner user ID")
     surveyLink: Optional[str] = Field(None, max_length=2048, description="Updated survey link")
     questions: Optional[List[SurveyQuestionItem]] = Field(

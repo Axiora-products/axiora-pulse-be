@@ -1,14 +1,10 @@
 """
-app/api/v1/surveys.py
-────────────────────────────────────────────────────────────────────────────────
-Survey router.
 
-All endpoints require a valid JWT Bearer token (get_current_user dependency).
 
 Routes:
-  POST /api/v1/surveys/saveAllSurveyQuestions   → save_all_survey_questions
-  GET  /api/v1/surveys/getAllSurveys            → get_all_surveys
-  PUT  /api/v1/surveys/updateSurvey             → update_survey
+  POST /api/v1/surveys                → save_all_survey_questions
+  GET  /api/v1/surveys                → get_all_surveys
+  PUT  /api/v1/surveys/{survey_id}    → update_survey
 """
 import logging
 
@@ -31,10 +27,10 @@ router = APIRouter(prefix="/surveys", tags=["Surveys"])
 logger = logging.getLogger(__name__)
 
 
-# ── Save All Survey Questions ────────────────────────────────────────────────
+#save all survey questions
 
 @router.post(
-    "/saveAllSurveyQuestions",
+    "",
     response_model=SurveyResponse,
     status_code=status.HTTP_200_OK,
     summary="Save all survey questions for a workspace",
@@ -54,10 +50,10 @@ async def save_all_survey_questions(
     return await survey_service.save_all_questions(payload, current_user, db)
 
 
-# ── Get All Surveys ───────────────────────────────────────────────────────────
+# Get All Surveys
 
 @router.get(
-    "/getAllSurveys",
+    "",
     response_model=SurveyListResponse,
     status_code=status.HTTP_200_OK,
     summary="Get all surveys for the current user",
@@ -72,24 +68,25 @@ async def get_all_surveys(
     return await survey_service.get_all_surveys(current_user, db)
 
 
-# ── Update Survey ─────────────────────────────────────────────────────────────
+# ── Update Survey
 
 @router.put(
-    "/updateSurvey",
+    "/{survey_id}",
     response_model=SurveyResponse,
     status_code=status.HTTP_200_OK,
-    summary="Update a survey",
+    summary="Update a survey by ID",
     description="Updates the survey link and/or question set for an existing survey owned by the authenticated user.",
 )
 @limiter.limit("20/minute")
 async def update_survey(
     request: Request,
+    survey_id: int,
     payload: UpdateSurveyRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SurveyResponse:
     logger.info(
         "Updating survey: survey_id=%s user_id=%s",
-        payload.surveyId, payload.userId,
+        survey_id, payload.userId,
     )
-    return await survey_service.update_survey(payload, current_user, db)
+    return await survey_service.update_survey(survey_id, payload, current_user, db)

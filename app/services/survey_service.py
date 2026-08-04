@@ -84,6 +84,7 @@ class SurveyService:
     # Update a survey
     async def update_survey(
         self,
+        survey_id: int,
         payload: UpdateSurveyRequest,
         current_user: User,
         db: AsyncSession,
@@ -95,13 +96,13 @@ class SurveyService:
                 detail="You do not have permission to update surveys for this user.",
             )
 
-        result = await db.execute(select(Survey).where(Survey.id == payload.surveyId))
+        result = await db.execute(select(Survey).where(Survey.id == survey_id))
         survey = result.scalar_one_or_none()
 
         if survey is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Survey {payload.surveyId} not found.",
+                detail=f"Survey {survey_id} not found.",
             )
         if survey.user_id != current_user.id:
             raise HTTPException(
