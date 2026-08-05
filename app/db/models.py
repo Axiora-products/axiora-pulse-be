@@ -242,6 +242,59 @@ class Workspace(Base):
         return f"<Workspace id={self.id} name={self.name!r} user_id={self.user_id} state={self.state!r} is_delete={self.is_delete}>"
 
 
+class Survey(Base):
+    """Persisted survey record — owns a set of questions scoped to a user's workspace."""
+
+    __tablename__ = "surveys"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    survey_link: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    questions: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<Survey id={self.id} user_id={self.user_id} workspace_id={self.workspace_id}>"
+
+
+class PublicSurveyResponse(Base):
+    """Stores external user responses for a shareable public survey."""
+
+    __tablename__ = "public_survey_responses"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    survey_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("surveys.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    respondent_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    answers: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<PublicSurveyResponse id={self.id} survey_id={self.survey_id}>"
+
+
+
 # ── Section 11: Core Orchestration Data Models (8 Tables) ─────────────────────
 
 class AgentDefinition(Base):
