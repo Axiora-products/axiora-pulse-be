@@ -1,0 +1,99 @@
+# axiora-pulse-be/.github/workflows/ci-build-push.yml
+#
+# Reusable builder: builds the backend image ONCE and pushes it to Amazon ECR.
+# Always pushes an immutable  sha-<gitsha>  tag; optionally also pushes moving
+# tags (e.g. `qa`, `prod`) passed via `extra_tags`.
+#
+# Auth is GitHub OIDC -> IAM role `axiora-gha-ecr` (no long-lived AWS keys).
+# Requires these repository VARIABLES (Phase-0 §7): AWS_REGION, ECR_REGISTRY,
+# AWS_ROLE_ARN. The role trust policy (Phase-0 §3) already allows develop and
+# release/* for this repo.
+#
+# This workflow builds the artifact; callers decide WHEN and which moving tags
+# to apply. It does not deploy anything.
+
+name: CI build & push
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: ECR repository name (e.g. axiora-pulse-be)
+        required: true
+        type: string
+      context:
+        description: Docker build context
+        required: false
+        type: string
+        default: "."
+      dockerfile:
+        description: Dockerfile path, relative to the build context
+        required: false
+        type: string
+        default: Dockerfile
+      extra_tags:
+        description: Comma-separated moving tags to also push (e.g. "qa")
+        required: false
+        type: string
+        default: ""
+    outputs:
+      image_ref:
+        description: Fully-qualified immutable image reference (registry/name:sha-<sha>)
+        value: ${{ jobs.build.outputs.image_ref }}
+      sha_tag:
+        description: The immutable tag that was pushed (sha-<sha>)
+        value: ${{ jobs.build.outputs.sha_tag }}
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+      sha_tag: ${{ steps.meta.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute tags
+        id: meta
+        run: |
+          set -euo pipefail
+          SHA_TAG="sha-${GITHUB_SHA::12}"
+          IMAGE="${{ vars.ECR_REGISTRY }}/${{ inputs.image_name }}"
+          TAGS="${IMAGE}:${SHA_TAG}"
+          IFS=',' read -ra EXTRA <<< "${{ inputs.extra_tags }}"
+          for t in "${EXTRA[@]}"; do
+            t="$(echo "$t" | xargs)"          # trim whitespace
+            [ -n "$t" ] && TAGS="${TAGS},${IMAGE}:${t}"
+          done
+          {
+            echo "tags=${TAGS}"
+            echo "sha_tag=${SHA_TAG}"
+            echo "image_ref=${IMAGE}:${SHA_TAG}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Will push: ${TAGS}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
