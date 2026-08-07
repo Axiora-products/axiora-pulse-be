@@ -56,6 +56,10 @@ class OpenAIProvider(LLMGateway):
     async def complete_stream(self, request: LLMRequest) -> AsyncGenerator[str, None]:
         """Stream response tokens/chunks word-by-word/line-by-line."""
         model = request.model or self._default_model
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+
         user_content = request.user_prompt
         if request.images:
             content_blocks = [{"type": "text", "text": request.user_prompt}]
@@ -67,7 +71,6 @@ class OpenAIProvider(LLMGateway):
             user_content = content_blocks
 
         messages.append({"role": "user", "content": user_content})
-
 
         kwargs: dict = {
             "model": model,
@@ -110,6 +113,10 @@ class OpenAIProvider(LLMGateway):
                 success=True,
             )
 
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+
         user_content = request.user_prompt
         if request.images:
             content_blocks = [{"type": "text", "text": request.user_prompt}]
@@ -121,7 +128,6 @@ class OpenAIProvider(LLMGateway):
             user_content = content_blocks
 
         messages.append({"role": "user", "content": user_content})
-
 
         kwargs: dict = {
             "model": model,
