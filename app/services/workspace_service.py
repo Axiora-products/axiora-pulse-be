@@ -13,7 +13,7 @@ Operations:
   process_mentor_chat()          → Process AI Mentor message in a workspace (owner-enforced).
   get_workspace_state()          → Fetch full workspace dialogue & validation state (owner-enforced).
   reset_workspace_mentor()       → Reset mentor dialogue for a workspace (owner-enforced).
-  export_workspace_report()      → Export PDF/Doc report for a workspace (owner-enforced).
+  export_workspace_report()      → Export template-based PDF report for a workspace (owner-enforced).
 """
 import logging
 from datetime import datetime, timezone
@@ -367,7 +367,7 @@ class WorkspaceService:
         current_user: User,
         db: AsyncSession,
     ) -> Response:
-        """Generate and download PDF or Doc report for a workspace."""
+        """Generate and download the template-based PDF report for a workspace."""
         workspace = await self._fetch_owned_workspace(workspace_id, current_user, db)
 
         if not workspace.validation_result:

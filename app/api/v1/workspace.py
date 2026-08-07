@@ -6,7 +6,7 @@ Workspace router — CRUD and workspace-owned sub-resources:
   - Send message to AI Mentor in workspace
   - Get full workspace dialogue state & validation results
   - Reset workspace conversation state
-  - Export PDF/Doc reports per agent for workspace
+  - Export template-based PDF reports per agent for workspace
 
 All endpoints require a valid JWT Bearer token (get_current_user dependency).
 
@@ -252,14 +252,14 @@ async def reset_workspace_mentor(
 @router.get(
     "/{workspace_id}/reports/{agent_name}",
     summary="Download agent report for a workspace",
-    description="Generates and downloads a report for a specific agent (idea_validation_agent, market_research_agent, or full) from a workspace.",
+    description="Generates and downloads a template-based PDF report for a specific agent (idea_validation_agent, market_research_agent, or full) from a workspace.",
 )
 @limiter.limit("30/minute")
 async def download_workspace_agent_report(
     request: Request,
     workspace_id: int,
     agent_name: str,
-    format: str = Query("pdf", description="Export format: pdf or doc"),
+    format: str = Query("pdf", description="Export format. PDF is the only supported report output."),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -269,7 +269,7 @@ async def download_workspace_agent_report(
 @router.post(
     "/{workspace_id}/reports/export",
     summary="Export agent report for a workspace via POST",
-    description="Generates and downloads an agent report (PDF or Doc) for the workspace.",
+    description="Generates and downloads a template-based PDF agent report for the workspace.",
 )
 @limiter.limit("30/minute")
 async def export_workspace_report(
