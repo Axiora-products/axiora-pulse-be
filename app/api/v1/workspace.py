@@ -24,7 +24,7 @@ Routes:
   GET    /api/v1/workspaces/{id}/reports/{agent}   → download_workspace_agent_report
   POST   /api/v1/workspaces/{id}/reports/export    → export_workspace_report
 """
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -33,12 +33,15 @@ from app.db.database import get_db
 from app.db.models import User
 from app.models.workspace_models import (
     CreateWorkspaceRequest,
+    DeleteAttachmentResponse,
     DeleteWorkspaceResponse,
     ExportWorkspaceReportRequest,
     RestoreWorkspaceResponse,
     UpdateWorkspaceRequest,
     UpdateWorkspaceSurveyQuestionsRequest,
     UpdateWorkspaceSurveyQuestionsResponse,
+    WorkspaceAttachmentListResponse,
+    WorkspaceAttachmentResponse,
     WorkspaceChatRequest,
     WorkspaceChatResponse,
     WorkspaceListResponse,
@@ -46,6 +49,7 @@ from app.models.workspace_models import (
     WorkspaceStateResponse,
 )
 from app.services.workspace_service import workspace_service
+from app.services.workspace_attachment_service import workspace_attachment_service
 
 router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
@@ -306,4 +310,102 @@ async def update_workspace_survey_questions(
         payload=payload,
         current_user=current_user,
         db=db
+    )
+
+
+# ── Workspace File Attachments Sub-resource ────────────────────────────────────
+
+@router.post(
+    "/{workspace_id}/attachments",
+    response_model=WorkspaceAttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a file to a workspace",
+    description=(
+        "Uploads a file (image, PDF, or document) to the workspace's dedicated S3 path. "
+        "Accepted MIME types: image/*, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, "
+        "text/plain, text/markdown, text/csv."
+    ),
+)
+@limiter.limit("30/minute")
+async def upload_workspace_attachment(
+    request: Request,
+    workspace_id: int,
+    file: UploadFile = File(..., description="File to upload (image, PDF, or doc)"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceAttachmentResponse:
+    return await workspace_attachment_service.upload_file(
+        workspace_id=workspace_id,
+        current_user=current_user,
+        file=file,
+        db=db,
+    )
+
+
+@router.get(
+    "/{workspace_id}/attachments",
+    response_model=WorkspaceAttachmentListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List all uploaded files for a workspace",
+    description="Returns all uploaded files for the workspace, optionally filtered by type (image | pdf | doc).",
+)
+@limiter.limit("60/minute")
+async def list_workspace_attachments(
+    request: Request,
+    workspace_id: int,
+    file_type: str = Query(None, description="Filter by file type: image | pdf | doc"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceAttachmentListResponse:
+    return await workspace_attachment_service.list_attachments(
+        workspace_id=workspace_id,
+        current_user=current_user,
+        db=db,
+        file_type=file_type,
+    )
+
+
+@router.get(
+    "/{workspace_id}/attachments/{attachment_id}",
+    response_model=WorkspaceAttachmentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get a single workspace attachment record",
+    description="Fetches the metadata for a single uploaded file by its ID.",
+)
+@limiter.limit("60/minute")
+async def get_workspace_attachment(
+    request: Request,
+    workspace_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceAttachmentResponse:
+    return await workspace_attachment_service.get_attachment(
+        workspace_id=workspace_id,
+        attachment_id=attachment_id,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.delete(
+    "/{workspace_id}/attachments/{attachment_id}",
+    response_model=DeleteAttachmentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete a workspace attachment",
+    description="Permanently deletes a file from S3 and removes its database record.",
+)
+@limiter.limit("30/minute")
+async def delete_workspace_attachment(
+    request: Request,
+    workspace_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DeleteAttachmentResponse:
+    return await workspace_attachment_service.delete_attachment(
+        workspace_id=workspace_id,
+        attachment_id=attachment_id,
+        current_user=current_user,
+        db=db,
     )

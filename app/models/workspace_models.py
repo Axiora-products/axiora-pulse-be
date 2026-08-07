@@ -34,9 +34,19 @@ class UpdateWorkspaceRequest(BaseModel):
     description: Optional[str] = Field(None, description="Updated workspace description (can be null/empty)")
 
 
+class AttachmentInput(BaseModel):
+    """Attachment item for mentor chat (image, pdf, doc, link)."""
+    type: str = Field(..., description="Attachment type: image | pdf | doc | link")
+    name: Optional[str] = Field(None, description="Filename or link title")
+    url_or_data: str = Field(..., description="Base64 encoded file content (for uploads) or HTTP URL (for web links)")
+    mime_type: Optional[str] = Field(None, description="MIME type e.g. application/pdf, image/png, text/plain")
+
+
 class WorkspaceChatRequest(BaseModel):
     """Payload for POST /api/v1/workspaces/{id}/chat."""
     message: str = Field(..., min_length=1, description="Message to send to AI Mentor inside this workspace")
+    attachments: Optional[List[AttachmentInput]] = Field(default_factory=list, description="Optional attachments (images, PDFs, docs, links)")
+
 
 
 class ExportWorkspaceReportRequest(BaseModel):
@@ -135,3 +145,38 @@ class RestoreWorkspaceResponse(BaseModel):
     message: str = "Workspace restored successfully."
     workspace_id: int
     is_delete: bool = False
+
+
+# ── Workspace Attachment Models ────────────────────────────────────────────────
+
+class WorkspaceAttachmentResponse(BaseModel):
+    """Returned for a single workspace attachment record."""
+    id: int
+    user_id: int
+    workspace_id: int
+    file_name: str
+    file_type: str  # 'image' | 'pdf' | 'doc'
+    mime_type: str
+    s3_key: str
+    file_url: str
+    file_size_bytes: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceAttachmentListResponse(BaseModel):
+    """Returned for a list of workspace attachment records."""
+    total: int
+    attachments: List[WorkspaceAttachmentResponse]
+
+
+class DeleteAttachmentResponse(BaseModel):
+    """Returned after a workspace attachment is deleted."""
+    status: str = "success"
+    message: str = "Attachment deleted successfully."
+    attachment_id: int
+    workspace_id: int
+
