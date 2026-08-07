@@ -62,6 +62,32 @@ class S3StorageService:
         else:
             logger.info("[S3StorageService] AWS credentials not set. Operating in local storage mode.")
 
+    def generate_presigned_url(
+        self,
+        s3_key: str,
+        bucket_name: str | None = None,
+        expiration: int = 3600,
+    ) -> str:
+        """
+        Generates a presigned URL for downloading an S3 object securely.
+        If S3 is not configured or fails, returns local file endpoint URL.
+        """
+        target_bucket = bucket_name or self.assets_bucket_name
+        if self._s3_client and s3_key and not s3_key.startswith("/"):
+            try:
+                url = self._s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": target_bucket, "Key": s3_key},
+                    ExpiresIn=expiration,
+                )
+                return url
+            except Exception as e:
+                logger.error("[S3StorageService] Failed to generate presigned URL for key %s: %s", s3_key, e)
+
+        if s3_key.startswith("http://") or s3_key.startswith("https://") or s3_key.startswith("/"):
+            return s3_key
+        return f"/uploads/{s3_key}"
+
     # ── Chat Attachment Uploads (axiora-pulse-attachments) ────────────────────
 
     def upload_file_bytes(
@@ -87,11 +113,7 @@ class S3StorageService:
                     Body=file_bytes,
                     ContentType=content_type,
                 )
-                if self.endpoint_url:
-                    file_url = f"{self.endpoint_url.rstrip('/')}/{self.bucket_name}/{s3_key}"
-                else:
-                    file_url = f"https://{self.bucket_name}.s3.{self.aws_region}.amazonaws.com/{s3_key}"
-
+                file_url = self.generate_presigned_url(s3_key, bucket_name=self.bucket_name)
                 logger.info("[S3StorageService] Uploaded %s to S3 (%s)", safe_filename, file_url)
                 return file_url, s3_key
             except Exception as e:
@@ -136,7 +158,7 @@ class S3StorageService:
 
         return self.upload_file_bytes(file_bytes, filename, workspace_id, content_type)
 
-    # ── Workspace Asset Uploads (axiora-assets, public-read) ─────────────────
+    # ── Workspace Asset Uploads (axiora-assets, private) ─────────────────────
 
     def upload_workspace_asset(
         self,
@@ -153,7 +175,7 @@ class S3StorageService:
 
         file_type should be one of: 'image', 'pdf', 'doc'
 
-        Returns Tuple[public_file_url, s3_key].
+        Returns Tuple[presigned_file_url, s3_key].
         Falls back to local storage if AWS credentials are not configured.
         """
         unique_id = uuid.uuid4().hex[:8]
@@ -163,23 +185,14 @@ class S3StorageService:
 
         if self._s3_client:
             try:
-                put_kwargs = {
-                    "Bucket": self.assets_bucket_name,
-                    "Key": s3_key,
-                    "Body": file_bytes,
-                    "ContentType": content_type,
-                }
-                # Attempt public-read ACL; if bucket uses bucket-owner-enforced policy, retry without ACL
-                try:
-                    put_kwargs["ACL"] = "public-read"
-                    self._s3_client.put_object(**put_kwargs)
-                except Exception:
-                    put_kwargs.pop("ACL", None)
-                    self._s3_client.put_object(**put_kwargs)
-
-                file_url = (
-                    f"https://{self.assets_bucket_name}.s3.{self.assets_region}.amazonaws.com/{s3_key}"
+                # Private object upload (no public-read ACL)
+                self._s3_client.put_object(
+                    Bucket=self.assets_bucket_name,
+                    Key=s3_key,
+                    Body=file_bytes,
+                    ContentType=content_type,
                 )
+                file_url = self.generate_presigned_url(s3_key)
                 logger.info(
                     "[S3StorageService] Uploaded workspace asset %s → %s",
                     safe_filename, file_url

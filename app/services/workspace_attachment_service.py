@@ -29,16 +29,17 @@ from app.services.s3_storage_service import s3_storage_service
 
 logger = logging.getLogger(__name__)
 
-# ── MIME type → file_type mapping ────────────────────────────────────────────
+# ── Size limits & Allowlist mappings ──────────────────────────────────────────
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB maximum upload size
+
 MIME_TO_FILE_TYPE: dict[str, str] = {
-    # Images
+    # Images (excluding image/svg+xml to prevent XSS)
     "image/jpeg": "image",
     "image/jpg": "image",
     "image/png": "image",
     "image/webp": "image",
     "image/gif": "image",
     "image/bmp": "image",
-    "image/svg+xml": "image",
     # PDFs
     "application/pdf": "pdf",
     # Documents
@@ -59,18 +60,122 @@ EXTENSION_TO_FILE_TYPE: dict[str, str] = {
 }
 
 
-def _detect_file_type(filename: str, content_type: str) -> str:
-    """Determine file_type ('image' | 'pdf' | 'doc') from MIME or extension."""
-    if content_type and content_type.lower() in MIME_TO_FILE_TYPE:
-        return MIME_TO_FILE_TYPE[content_type.lower()]
+def _detect_file_type(filename: str, content_type: str) -> Optional[str]:
+    """
+    Determine file_type ('image' | 'pdf' | 'doc') from MIME type and extension.
+    Enforces a strict allowlist. Returns None if the file type/extension is unknown or mismatched.
+    """
+    clean_ct = (content_type or "").split(";")[0].strip().lower()
+    mime_type_cat = MIME_TO_FILE_TYPE.get(clean_ct)
+
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext in EXTENSION_TO_FILE_TYPE:
-        return EXTENSION_TO_FILE_TYPE[ext]
-    return "doc"  # safe default
+    ext_type_cat = EXTENSION_TO_FILE_TYPE.get(ext)
+
+    # Reject if both extension and content-type are absent from allowlist
+    if not mime_type_cat and not ext_type_cat:
+        return None
+
+    # If both exist, ensure they match the same file_type category
+    if mime_type_cat and ext_type_cat and mime_type_cat != ext_type_cat:
+        return None
+
+    return mime_type_cat or ext_type_cat
+
+
+def _validate_uploaded_file(file_bytes: bytes, filename: str, content_type: str) -> str:
+    """
+    Validates file size, MIME type allowlist, extension allowlist, and binary file signatures.
+    Raises HTTPException (400) if validation fails.
+    Returns the validated file_type ('image' | 'pdf' | 'doc').
+    """
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+
+    if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds the maximum limit of {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
+        )
+
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    # Disallow dangerous executable/script extensions explicitly
+    forbidden_exts = {".html", ".htm", ".svg", ".exe", ".sh", ".php", ".js", ".jar", ".bat", ".cmd", ".vbs", ".py"}
+    if ext in forbidden_exts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File extension '{ext}' is forbidden.",
+        )
+
+    file_type = _detect_file_type(filename, content_type)
+    if not file_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported file type or extension for filename '{filename}' (content_type='{content_type}'). "
+                "Only images (JPEG, PNG, WEBP, GIF, BMP), PDFs, and documents (DOCX, DOC, TXT, MD, RTF, CSV) are allowed."
+            ),
+        )
+
+    # ── Binary File Signature Validation ──────────────────────────────────────
+    if file_type == "image":
+        is_valid_image = (
+            file_bytes.startswith(b"\x89PNG\r\n\x1a\n") or
+            file_bytes.startswith(b"\xff\xd8\xff") or
+            file_bytes.startswith(b"GIF87a") or
+            file_bytes.startswith(b"GIF89a") or
+            file_bytes.startswith(b"BM") or
+            (file_bytes.startswith(b"RIFF") and b"WEBP" in file_bytes[8:12])
+        )
+        if not is_valid_image:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File content does not match a valid image signature.",
+            )
+
+    elif file_type == "pdf":
+        if not file_bytes.startswith(b"%PDF-") and b"%PDF-" not in file_bytes[:1024]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File content does not match a valid PDF signature.",
+            )
+
+    elif file_type == "doc":
+        if ext == ".docx" and not file_bytes.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File content does not match a valid DOCX signature.",
+            )
+        elif ext == ".doc" and not file_bytes.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File content does not match a valid DOC signature.",
+            )
+        elif ext in (".txt", ".md", ".csv", ".rtf"):
+            sample = file_bytes[:4096].lower()
+            if any(tag in sample for tag in [b"<script", b"<html", b"<?php", b"<iframe", b"<svg"]):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Text file contains forbidden script or HTML tags.",
+                )
+
+    return file_type
 
 
 class WorkspaceAttachmentService:
     """Stateless service — all state lives in the DB session."""
+
+    def _format_attachment_response(
+        self, attachment: WorkspaceAttachment
+    ) -> WorkspaceAttachmentResponse:
+        """Format WorkspaceAttachment into WorkspaceAttachmentResponse with fresh presigned URL."""
+        resp = WorkspaceAttachmentResponse.model_validate(attachment)
+        if attachment.s3_key:
+            resp.file_url = s3_storage_service.generate_presigned_url(attachment.s3_key)
+        return resp
 
     # ── Upload ────────────────────────────────────────────────────────────────
 
@@ -82,7 +187,7 @@ class WorkspaceAttachmentService:
         db: AsyncSession,
     ) -> WorkspaceAttachmentResponse:
         """
-        Read a multipart uploaded file, push it to S3 (axiora-assets bucket),
+        Read a multipart uploaded file, validate type/signature/size, push it to S3,
         and persist a WorkspaceAttachment record in the database.
         """
         # Verify workspace ownership
@@ -91,7 +196,8 @@ class WorkspaceAttachmentService:
         file_bytes = await file.read()
         filename = file.filename or "upload"
         content_type = file.content_type or "application/octet-stream"
-        file_type = _detect_file_type(filename, content_type)
+
+        file_type = _validate_uploaded_file(file_bytes, filename, content_type)
         file_size = len(file_bytes)
 
         # Upload to axiora-assets bucket
@@ -123,7 +229,7 @@ class WorkspaceAttachmentService:
             "[WorkspaceAttachmentService] Uploaded %s (%s) to workspace %s for user %s → %s",
             filename, file_type, workspace_id, current_user.id, file_url
         )
-        return WorkspaceAttachmentResponse.model_validate(attachment)
+        return self._format_attachment_response(attachment)
 
     # ── Save from base64 (used by chat sync) ─────────────────────────────────
 
@@ -147,7 +253,7 @@ class WorkspaceAttachmentService:
 
             raw = base64_data.split(",", 1)[-1] if "," in base64_data else base64_data
             file_bytes = b64lib.b64decode(raw)
-            file_type = _detect_file_type(filename, mime_type)
+            file_type = _validate_uploaded_file(file_bytes, filename, mime_type)
 
             file_url, s3_key = s3_storage_service.upload_workspace_asset(
                 file_bytes=file_bytes,
@@ -176,7 +282,7 @@ class WorkspaceAttachmentService:
                 "[WorkspaceAttachmentService] Synced chat attachment %s to workspace %s for user %s",
                 filename, workspace_id, user_id
             )
-            return WorkspaceAttachmentResponse.model_validate(attachment)
+            return self._format_attachment_response(attachment)
 
         except Exception as e:
             logger.warning(
@@ -213,7 +319,7 @@ class WorkspaceAttachmentService:
 
         return WorkspaceAttachmentListResponse(
             total=len(attachments),
-            attachments=[WorkspaceAttachmentResponse.model_validate(a) for a in attachments],
+            attachments=[self._format_attachment_response(a) for a in attachments],
         )
 
     # ── Get Single ────────────────────────────────────────────────────────────
@@ -229,7 +335,7 @@ class WorkspaceAttachmentService:
         attachment = await self._fetch_owned_attachment(
             workspace_id, attachment_id, current_user, db
         )
-        return WorkspaceAttachmentResponse.model_validate(attachment)
+        return self._format_attachment_response(attachment)
 
     # ── Delete ────────────────────────────────────────────────────────────────
 
