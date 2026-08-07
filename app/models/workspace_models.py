@@ -52,7 +52,7 @@ class WorkspaceChatRequest(BaseModel):
 class ExportWorkspaceReportRequest(BaseModel):
     """Payload for POST /api/v1/workspaces/{id}/reports/export."""
     agent_name: str = Field("idea_validation_agent", description="idea_validation_agent | market_research_agent | full")
-    format: str = Field("pdf", description="Export format: pdf or doc")
+    format: str = Field("pdf", description="Export format. PDF is the only supported report output.")
 
 
 # ── Response Models ────────────────────────────────────────────────────────────
