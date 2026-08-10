@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import smtplib
+import ssl
 from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -29,9 +30,9 @@ load_dotenv()
 # ── SMTP environment variable helpers ─────────────────────────────────────────
 _SMTP_HOST       = os.getenv("SMTP_HOST", "")
 _SMTP_PORT       = int(os.getenv("SMTP_PORT", "587"))
-_SMTP_USER       = os.getenv("SMTP_USER", "")
+_SMTP_USER       = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME", "")
 _SMTP_PASSWORD   = os.getenv("SMTP_PASSWORD", "")
-_SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
+_SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or _SMTP_USER
 _SMTP_FROM_NAME  = os.getenv("SMTP_FROM_NAME", "Axiora Pulse")
 _OTP_EXPIRE_MINS = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
 
@@ -131,14 +132,20 @@ def _build_otp_email(to_email: str, otp: int) -> MIMEMultipart:
 
 
 def _smtp_send(to_email: str, msg: MIMEMultipart) -> None:
-    """Blocking SMTP send with STARTTLS — intended to run in a thread pool."""
-    with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT, timeout=30) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(_SMTP_USER, _SMTP_PASSWORD)
-        server.sendmail(_SMTP_FROM_EMAIL, [to_email], msg.as_string())
-    logger.info("OTP email dispatched → %s", to_email)
+    """Blocking SMTP send supporting SSL (Port 465) and STARTTLS (Port 587/25)."""
+    if _SMTP_PORT == 465:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT, context=context, timeout=30) as server:
+            server.login(_SMTP_USER, _SMTP_PASSWORD)
+            server.sendmail(_SMTP_FROM_EMAIL, [to_email], msg.as_string())
+    else:
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT, timeout=30) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(_SMTP_USER, _SMTP_PASSWORD)
+            server.sendmail(_SMTP_FROM_EMAIL, [to_email], msg.as_string())
+    logger.info("OTP email dispatched via SMTP (%s:%s) → %s", _SMTP_HOST, _SMTP_PORT, to_email)
 
 
 # ── Public async interface ─────────────────────────────────────────────────────
