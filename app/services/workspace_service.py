@@ -9,6 +9,7 @@ Operations:
   get_workspace()                → Fetch a single workspace by ID (owner-enforced).
   get_workspaces_by_user_id()    → Fetch all workspaces for a given user_id (self-service enforced).
   delete_workspace()             → Archive (soft-delete) a workspace by ID (owner-enforced).
+  hard_delete_workspace()        → Permanently delete a workspace and its data (owner-enforced).
   restore_workspace()            → Restore an archived workspace by ID (owner-enforced).
   process_mentor_chat()          → Process AI Mentor message in a workspace (owner-enforced).
   get_workspace_state()          → Fetch full workspace dialogue & validation state (owner-enforced).
@@ -23,10 +24,11 @@ from fastapi import HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import User, Workspace
+from app.db.models import User, Workspace, WorkspaceAttachment
 from app.models.workspace_models import (
     CreateWorkspaceRequest,
     DeleteWorkspaceResponse,
+    HardDeleteWorkspaceResponse,
     RestoreWorkspaceResponse,
     UpdateWorkspaceRequest,
     UpdateWorkspaceSurveyQuestionsRequest,
@@ -39,6 +41,7 @@ from app.models.workspace_models import (
 )
 from app.services.mentor_service import mentor_service, WorkspaceMentorState
 from app.services.report_service import report_service
+from app.services.s3_storage_service import s3_storage_service
 from app.services.survey_service import survey_service
 from app.services.workspace_attachment_service import workspace_attachment_service
 
@@ -58,6 +61,8 @@ class WorkspaceService:
     ) -> WorkspaceResponse:
         """Create a new workspace owned by current_user."""
         now = datetime.now(timezone.utc)
+
+        await self._ensure_unique_name(payload.name.strip(), current_user, db)
 
         workspace = Workspace(
             user_id=current_user.id,
@@ -134,7 +139,11 @@ class WorkspaceService:
         """Update name and/or description of an owned workspace — 404/403 enforced."""
         workspace = await self._fetch_owned_workspace(workspace_id, current_user, db)
 
-        workspace.name = payload.name.strip()
+        new_name = payload.name.strip()
+        if new_name != workspace.name:
+            await self._ensure_unique_name(new_name, current_user, db, exclude_workspace_id=workspace_id)
+
+        workspace.name = new_name
         workspace.description = payload.description.strip() if payload.description else None
         workspace.updated_at = datetime.now(timezone.utc)
 
@@ -203,6 +212,39 @@ class WorkspaceService:
             workspace_id, current_user.id,
         )
         return DeleteWorkspaceResponse(workspace_id=workspace_id, is_delete=True)
+
+    # ── Hard Delete ───────────────────────────────────────────────────────────
+
+    async def hard_delete_workspace(
+        self,
+        workspace_id: int,
+        current_user: User,
+        db: AsyncSession,
+    ) -> HardDeleteWorkspaceResponse:
+        """Permanently delete a workspace and all its data — 404/403 enforced.
+
+        Removes any S3-stored attachments (best-effort), then deletes the workspace
+        row. Related workspace_attachments/surveys rows are removed via DB-level
+        ON DELETE CASCADE.
+        """
+        workspace = await self._fetch_owned_workspace(
+            workspace_id, current_user, db, require_active=False
+        )
+
+        result = await db.execute(
+            select(WorkspaceAttachment).where(WorkspaceAttachment.workspace_id == workspace_id)
+        )
+        for attachment in result.scalars().all():
+            s3_storage_service.delete_workspace_asset(attachment.s3_key)
+
+        await db.delete(workspace)
+        await db.flush()
+
+        logger.info(
+            "Workspace permanently deleted: id=%s user_id=%s",
+            workspace_id, current_user.id,
+        )
+        return HardDeleteWorkspaceResponse(workspace_id=workspace_id)
 
     # ── Restore ───────────────────────────────────────────────────────────────
 
@@ -450,6 +492,32 @@ class WorkspaceService:
         )
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    async def _ensure_unique_name(
+        self,
+        name: str,
+        current_user: User,
+        db: AsyncSession,
+        exclude_workspace_id: Optional[int] = None,
+    ) -> None:
+        """Raise 409 if current_user already has a workspace with this name.
+
+        Checks across all workspaces regardless of archive status — an archived
+        workspace's title stays reserved until it is permanently deleted.
+        """
+        query = select(Workspace).where(
+            Workspace.user_id == current_user.id,
+            Workspace.name == name,
+        )
+        if exclude_workspace_id is not None:
+            query = query.where(Workspace.id != exclude_workspace_id)
+
+        result = await db.execute(query)
+        if result.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"You already have a workspace named '{name}'.",
+            )
 
     async def _fetch_owned_workspace(
         self,

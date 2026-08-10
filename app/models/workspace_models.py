@@ -8,6 +8,7 @@ Endpoints covered:
   GET    /api/v1/workspaces                        → WorkspaceListResponse
   GET    /api/v1/workspaces/{id}                   → WorkspaceResponse
   DELETE /api/v1/workspaces/{id}                   → DeleteWorkspaceResponse (archives, is_delete=true)
+  DELETE /api/v1/workspaces/{id}/permanent         → HardDeleteWorkspaceResponse (irreversible)
   PATCH  /api/v1/workspaces/{id}/restore           → RestoreWorkspaceResponse (is_delete=false)
   POST   /api/v1/workspaces/{id}/chat              → WorkspaceChatRequest   → WorkspaceChatResponse
   GET    /api/v1/workspaces/{id}/state             → WorkspaceStateResponse
@@ -137,6 +138,13 @@ class UpdateWorkspaceSurveyQuestionsResponse(BaseModel):
     questions: List[Dict[str, Any]]
 
     is_delete: bool = True
+
+
+class HardDeleteWorkspaceResponse(BaseModel):
+    """Returned after a workspace is permanently deleted."""
+    status: str = "success"
+    message: str = "Workspace permanently deleted."
+    workspace_id: int
 
 
 class RestoreWorkspaceResponse(BaseModel):
