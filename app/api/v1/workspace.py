@@ -17,6 +17,7 @@ Routes:
   GET    /api/v1/workspaces/{id}                   → get_workspace
   PUT    /api/v1/workspaces/{id}                   → update_workspace
   DELETE /api/v1/workspaces/{id}                   → delete_workspace (archives, is_delete=true)
+  DELETE /api/v1/workspaces/{id}/permanent         → hard_delete_workspace (irreversible)
   PATCH  /api/v1/workspaces/{id}/restore           → restore_workspace (is_delete=false)
   POST   /api/v1/workspaces/{id}/chat              → chat_workspace_mentor
   GET    /api/v1/workspaces/{id}/state             → get_workspace_state
@@ -36,6 +37,7 @@ from app.models.workspace_models import (
     DeleteAttachmentResponse,
     DeleteWorkspaceResponse,
     ExportWorkspaceReportRequest,
+    HardDeleteWorkspaceResponse,
     RestoreWorkspaceResponse,
     UpdateWorkspaceRequest,
     UpdateWorkspaceSurveyQuestionsRequest,
@@ -170,7 +172,29 @@ async def delete_workspace(
     return await workspace_service.delete_workspace(workspace_id, current_user, db)
 
 
-# Restore Workspace 
+# Permanently Delete Workspace
+
+@router.delete(
+    "/{workspace_id}/permanent",
+    response_model=HardDeleteWorkspaceResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Permanently delete a workspace by ID",
+    description=(
+        "Irreversibly deletes a workspace and all associated data (attachments, surveys). "
+        "This cannot be undone. Use DELETE /{workspace_id} to archive instead if you may want to restore it later."
+    ),
+)
+@limiter.limit("10/minute")
+async def hard_delete_workspace(
+    request: Request,
+    workspace_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HardDeleteWorkspaceResponse:
+    return await workspace_service.hard_delete_workspace(workspace_id, current_user, db)
+
+
+# Restore Workspace
 
 @router.patch(
     "/{workspace_id}/restore",

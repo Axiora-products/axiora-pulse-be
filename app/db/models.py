@@ -3,7 +3,7 @@ from datetime import datetime
 import uuid
 
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, JSON
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -203,6 +203,9 @@ class Workspace(Base):
     """
 
     __tablename__ = "workspaces"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_workspaces_user_id_name"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True, index=True
