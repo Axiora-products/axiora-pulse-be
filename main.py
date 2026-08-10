@@ -75,11 +75,14 @@ async def lifespan(app: FastAPI):
     _validate_security_config()
 
     # Apply any pending DB migrations (Alembic upgrade head)
-    await run_migrations()
-
-    # Seed default admin user account
-    async with AsyncSessionLocal() as session:
-        await seed_admin_user(session)
+    try:
+        await run_migrations()
+        # Seed default admin user account
+        async with AsyncSessionLocal() as session:
+            await seed_admin_user(session)
+    except Exception as exc:
+        logger.error("⚠ Database initialization/migration failed: %s", exc)
+        logger.warning("⚠ Server starting in degraded mode. Docs and non-DB endpoints remain accessible.")
 
     # Load all skill YAML files into the registry
     skill_registry.load_all()
