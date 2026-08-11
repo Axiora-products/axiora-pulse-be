@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 load_dotenv()
 
 _DATABASE_URL = os.getenv("DATABASE_URL", "")
-_DEBUG = os.getenv("DEBUG", "true").lower() in ("true", "1", "t", "yes", "y")
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +53,7 @@ engine = create_async_engine(
     pool_pre_ping=True,       # Detect stale connections before handing them out
     pool_size=10,
     max_overflow=20,
-    # In production, keep tracebacks (statement shape + stack) but strip bind
-    # parameter values — a failed insert would otherwise dump the raw password
-    # hash / OTP / email straight into the exception message and into
-    # CloudWatch. Left visible in DEBUG mode for easier local debugging.
-    hide_parameters=not _DEBUG,
+    hide_parameters=True, 
 )
 
 # ── Session factory ────────────────────────────────────────────────────────────
