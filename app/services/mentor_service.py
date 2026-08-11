@@ -25,7 +25,7 @@ class WorkspaceMentorState(BaseModel):
         "founder_validation_goal": "validate my idea",
         "geography": "global"
     })
-    conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+    conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
     validation_result: Optional[Dict[str, Any]] = None
 
 
