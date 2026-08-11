@@ -1,6 +1,8 @@
 import os
+import shutil
 import pytest
 import pytest_asyncio
+from pathlib import Path
 from typing import AsyncGenerator
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -26,6 +28,30 @@ from app.core.limiter import limiter
 limiter.enabled = False
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
+_UPLOADS_WORKSPACES_DIR = Path("uploads/workspaces")
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_local_upload_files():
+    """Remove any files s3_storage_service falls back to writing under
+    uploads/workspaces/ during a test (no AWS credentials configured in
+    the test environment). Prevents test runs from leaving disk artifacts
+    behind on every pytest invocation. Tracks individual files (not just
+    top-level workspace directories) so new files written inside an
+    already-existing workspace folder are still caught."""
+    before = set(_UPLOADS_WORKSPACES_DIR.rglob("*")) if _UPLOADS_WORKSPACES_DIR.exists() else set()
+    yield
+    if not _UPLOADS_WORKSPACES_DIR.exists():
+        return
+    after = set(_UPLOADS_WORKSPACES_DIR.rglob("*"))
+    for entry in sorted(after - before, key=lambda p: len(p.parts), reverse=True):
+        if not entry.exists():
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
 
 @pytest_asyncio.fixture
 async def test_engine():
