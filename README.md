@@ -220,6 +220,10 @@ Below is a reference of all supported variables with descriptions:
 | `SMTP_PASSWORD` | ✅ | SMTP login password or app password |
 | `SMTP_FROM_EMAIL` | — | Envelope sender address used in outgoing mail |
 | `SMTP_FROM_NAME` | `Axiora Pulse` | Display name for outgoing emails |
+| `SUPPORT_EMAIL` | `no.reply@axiorapulse.com` | Support contact address shown in transactional emails (e.g. "didn't request this?" notices) |
+| `DASHBOARD_LOGIN_URL` | `https://qa.axiorapulse.com/login` | Frontend login/dashboard URL linked from the "Go to Dashboard" button in the welcome email |
+| `EMAIL_LOGO_LIGHT_URL` | Cloudinary-hosted default | Hosted URL of the light-background Axiora Pulse logo used in transactional emails |
+| `EMAIL_LOGO_DARK_URL` | Cloudinary-hosted default | Hosted URL of the dark-background Axiora Pulse logo, swapped in for dark-mode-aware email clients |
 
 ### CORS
 
