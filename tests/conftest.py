@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 from pathlib import Path
 from typing import AsyncGenerator
+from unittest.mock import patch
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from httpx import AsyncClient, ASGITransport
@@ -52,6 +53,22 @@ def _cleanup_local_upload_files():
             shutil.rmtree(entry, ignore_errors=True)
         else:
             entry.unlink(missing_ok=True)
+
+@pytest.fixture
+def stub_enqueue_email_job():
+    """Replace the fire-and-forget transactional email dispatcher with a
+    plain Mock so registration/password-reset flows don't spawn real
+    background asyncio tasks that attempt live SMTP connections during
+    tests. Autoused below; request this fixture by name in a test to
+    assert on how it was called."""
+    with patch("app.services.auth_service.enqueue_email_job") as mock_enqueue:
+        yield mock_enqueue
+
+
+@pytest.fixture(autouse=True)
+def _autouse_stub_enqueue_email_job(stub_enqueue_email_job):
+    yield stub_enqueue_email_job
+
 
 @pytest_asyncio.fixture
 async def test_engine():
