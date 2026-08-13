@@ -308,6 +308,9 @@ class Survey(Base):
     workspace_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    public_token: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True, default=lambda: uuid.uuid4().hex
+    )
     survey_link: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     questions: Mapped[list] = mapped_column(
         JSON, nullable=False, default=list

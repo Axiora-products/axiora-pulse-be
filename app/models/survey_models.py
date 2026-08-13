@@ -95,7 +95,7 @@ class SubmitPublicSurveyResponse(BaseModel):
 
 class PublicSurveyDetailResponse(BaseModel):
     """Public details of a survey for external respondents (no auth needed)."""
-    surveyId: int
+    surveyId: str = Field(..., description="Opaque public survey token")
     workspaceName: str
     questions: List[SurveyQuestionItem]
 
