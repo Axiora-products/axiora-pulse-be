@@ -19,10 +19,11 @@ import logging
 import os
 import smtplib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -40,6 +41,21 @@ _SMTP_FROM_NAME  = os.getenv("SMTP_FROM_NAME", "Axiora Pulse")
 _OTP_EXPIRE_MINS = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
 _SUPPORT_EMAIL   = os.getenv("SUPPORT_EMAIL", "no.reply@axiorapulse.com")
 _DASHBOARD_LOGIN_URL = os.getenv("DASHBOARD_LOGIN_URL", "https://qa.axiorapulse.com/login")
+
+
+def _resolve_email_timezone(name: str) -> timezone | ZoneInfo:
+    """Resolve the IANA zone name, falling back to a fixed UTC+5:30 offset"""
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        logging.getLogger(__name__).warning(
+            "Timezone database not found for '%s' (is the 'tzdata' package installed?). "
+            "Falling back to a fixed UTC+5:30 offset for email timestamps.", name
+        )
+        return timezone(timedelta(hours=5, minutes=30))
+
+
+_EMAIL_TIMEZONE = _resolve_email_timezone(os.getenv("EMAIL_TIMEZONE", "Asia/Kolkata"))
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +478,10 @@ def _build_password_reset_success_email(to_email: str, changed_at: Optional[date
     msg["To"] = to_email
 
     when = changed_at or datetime.now(tz=timezone.utc)
-    timestamp_str = when.strftime("%B %d, %Y at %H:%M UTC")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    local_when = when.astimezone(_EMAIL_TIMEZONE)
+    timestamp_str = local_when.strftime("%B %d, %Y at %I:%M %p %Z")
     safe_timestamp = html.escape(timestamp_str)
 
     plain_body = (
