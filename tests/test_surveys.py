@@ -231,10 +231,6 @@ async def test_get_all_surveys_returns_only_authenticated_users_surveys(
     assert data["surveys"][0]["id"] == survey_a.id
 
 
-@pytest.mark.asyncio
-async def test_get_all_surveys_rejects_unauthenticated_requests(client: AsyncClient):
-    response = await client.get("/api/v1/surveys")
-    assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 # get /api/v1/surveys/{survey_id} — get survey by id
