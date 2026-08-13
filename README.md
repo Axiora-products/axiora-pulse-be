@@ -432,10 +432,12 @@ All routes except the two `public` routes require a valid **JWT Bearer token**.
 | `DELETE` | `/api/v1/surveys/{survey_id}` | ✅ | Delete a survey (returns `204 No Content`) |
 | `GET` | `/api/v1/surveys/{survey_id}/export` | ✅ | Export survey responses (CSV) |
 | `GET` | `/api/v1/surveys/{survey_id}/responses` | ✅ | List raw survey responses |
-| `GET` | `/api/v1/surveys/public/{survey_id}` | ❌ | Public survey view, for respondents |
-| `POST` | `/api/v1/surveys/public/{survey_id}/submit` | ❌ | Public survey submission (returns `201 Created`) |
+| `GET` | `/api/v1/surveys/public/{token}` | ❌ | Public survey view, for respondents |
+| `POST` | `/api/v1/surveys/public/{token}/submit` | ❌ | Public survey submission (returns `201 Created`) |
 
 Public survey links are built from `PUBLIC_APP_URL` (see [Environment Variables](#environment-variables)).
+
+The two public routes are keyed by `Survey.public_token` — an opaque, randomly generated identifier (`uuid.uuid4().hex`, unique-indexed) — rather than the internal sequential `survey_id` used everywhere else in this table. This is deliberate: those two routes are unauthenticated by design (external respondents have no account), so keying them off a sequential integer would let anyone enumerate `/public/1`, `/public/2`, ... and view or submit responses to surveys never shared with them. The owner-facing routes above stay on the internal `id` since they're already protected by JWT auth + ownership checks.
 
 ---
 

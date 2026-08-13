@@ -162,7 +162,7 @@ class SurveyService:
 
         if not survey.survey_link:
             base_url = os.getenv("PUBLIC_APP_URL", "http://localhost:8000")
-            survey.survey_link = f"{base_url.rstrip('/')}/api/v1/surveys/public/{survey.id}"
+            survey.survey_link = f"{base_url.rstrip('/')}/api/v1/surveys/public/{survey.public_token}"
             await db.flush()
 
         await db.refresh(survey)
@@ -184,6 +184,7 @@ class SurveyService:
         """Partially update a survey's link and/or question set — 404/403 enforced."""
         logger.info("Updating survey for user id: %s survey id: %s", current_user.id, survey_id)
         if payload.userId != current_user.id:
+            logger.warning(f"User {current_user.id} attempted to update survey {survey_id} for user {payload.userId}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to update surveys for this user.",
@@ -208,7 +209,7 @@ class SurveyService:
         if payload.questions is not None:
             survey.questions = [q.model_dump() for q in payload.questions]
         survey.updated_at = datetime.now(timezone.utc)
-
+        logger.info(f"Survey updated: survey_id={survey.id} user_id={current_user.id} question_count={len(survey.questions)}")
         await db.flush()
         await db.refresh(survey)
 
@@ -359,18 +360,18 @@ class SurveyService:
     # ── Public survey details (Unauthenticated)
     async def get_public_survey(
         self,
-        survey_id: int,
+        token: str,
         db: AsyncSession,
     ) -> PublicSurveyDetailResponse:
         """Retrieve public details of a survey for external respondents without login."""
-        logger.info("Public survey requested: survey id: %s", survey_id)
-        result = await db.execute(select(Survey).where(Survey.id == survey_id))
+        logger.info("Public survey requested: token=%s", token)
+        result = await db.execute(select(Survey).where(Survey.public_token == token))
         survey = result.scalar_one_or_none()
 
         if survey is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Survey {survey_id} not found.",
+                detail="Survey not found.",
             )
 
         workspace_result = await db.execute(select(Workspace).where(Workspace.id == survey.workspace_id))
@@ -380,7 +381,7 @@ class SurveyService:
         questions_list = [SurveyQuestionItem(**q) if isinstance(q, dict) else q for q in survey.questions]
 
         return PublicSurveyDetailResponse(
-            surveyId=survey.id,
+            surveyId=survey.public_token,
             workspaceName=ws_name,
             questions=questions_list,
         )
@@ -388,25 +389,26 @@ class SurveyService:
     # ── Submit public survey response (Unauthenticated)
     async def submit_public_survey(
         self,
-        survey_id: int,
+        token: str,
         payload: SubmitPublicSurveyRequest,
         db: AsyncSession,
     ) -> SubmitPublicSurveyResponse:
         """Persist responses from an external respondent for a public survey."""
-        survey_result = await db.execute(select(Survey).where(Survey.id == survey_id))
+        survey_result = await db.execute(select(Survey).where(Survey.public_token == token))
         survey = survey_result.scalar_one_or_none()
 
         if survey is None:
+            logger.warning("Public survey submission failed: survey not found")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Survey {survey_id} not found.",
+                detail="Survey not found.",
             )
 
         answers_payload = [ans.model_dump() for ans in payload.answers]
         now = datetime.now(timezone.utc)
 
         response_record = PublicSurveyResponse(
-            survey_id=survey_id,
+            survey_id=survey.id,
             respondent_email=payload.respondentEmail.strip() if payload.respondentEmail else None,
             answers=answers_payload,
             submitted_at=now,
@@ -418,7 +420,7 @@ class SurveyService:
 
         logger.info(
             "Public survey response submitted: response_id=%s survey_id=%s respondent=%s",
-            response_record.id, survey_id, payload.respondentEmail
+            response_record.id, survey.id, payload.respondentEmail
         )
 
         return SubmitPublicSurveyResponse(

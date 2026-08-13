@@ -521,13 +521,25 @@ async def test_get_public_survey_success(client: AsyncClient, db_session: AsyncS
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
     # No authentication override — public endpoint
-    response = await client.get(f"/api/v1/surveys/public/{survey.id}")
+    response = await client.get(f"/api/v1/surveys/public/{survey.public_token}")
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert data["surveyId"] == survey.id
+    assert data["surveyId"] == survey.public_token
     assert data["workspaceName"] == "Public Workspace"
     assert len(data["questions"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_public_survey_by_raw_id_is_rejected(client: AsyncClient, db_session: AsyncSession):
+    """A respondent must not be able to access a survey by guessing/incrementing
+    its internal sequential ID — only the opaque public_token should resolve."""
+    user = await create_test_user(db_session, username="survey-public-idor@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=user.id, name="IDOR Workspace")
+    survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
+
+    response = await client.get(f"/api/v1/surveys/public/{survey.id}")
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -552,7 +564,7 @@ async def test_submit_public_survey_success(client: AsyncClient, db_session: Asy
         ],
     }
 
-    response = await client.post(f"/api/v1/surveys/public/{survey.id}/submit", json=payload)
+    response = await client.post(f"/api/v1/surveys/public/{survey.public_token}/submit", json=payload)
 
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
@@ -583,7 +595,7 @@ async def test_submit_public_survey_allows_missing_email(
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
     payload = {"answers": [{"questionId": 1, "answer": "29"}]}
-    response = await client.post(f"/api/v1/surveys/public/{survey.id}/submit", json=payload)
+    response = await client.post(f"/api/v1/surveys/public/{survey.public_token}/submit", json=payload)
 
     assert response.status_code == status.HTTP_201_CREATED
 
