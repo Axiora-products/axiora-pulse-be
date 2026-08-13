@@ -312,6 +312,9 @@ class Survey(Base):
     questions: Mapped[list] = mapped_column(
         JSON, nullable=False, default=list
     )
+    analysis_result: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
