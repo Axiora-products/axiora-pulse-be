@@ -55,7 +55,6 @@ class UpdateSurveyRequest(BaseModel):
 class SurveyResponse(BaseModel):
     """Returned for a single survey."""
     id: int
-    survey_id: Optional[int] = None
     user_id: int
     workspace_id: int
     public_token: str
@@ -66,11 +65,6 @@ class SurveyResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-    @model_validator(mode="after")
-    def set_survey_id(self) -> "SurveyResponse":
-        self.survey_id = self.id
-        return self
 
 
 class SurveyListResponse(BaseModel):
