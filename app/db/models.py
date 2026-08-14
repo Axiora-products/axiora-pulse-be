@@ -267,10 +267,10 @@ class WorkspaceAttachment(Base):
         Integer, primary_key=True, autoincrement=True, index=True
     )
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     file_name: Mapped[str] = mapped_column(String(512), nullable=False)
     file_type: Mapped[str] = mapped_column(
@@ -307,6 +307,9 @@ class Survey(Base):
     )
     workspace_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    public_token: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True, default=lambda: uuid.uuid4().hex
     )
     survey_link: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     questions: Mapped[list] = mapped_column(

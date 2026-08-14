@@ -1,7 +1,10 @@
 import os
+import shutil
 import pytest
 import pytest_asyncio
+from pathlib import Path
 from typing import AsyncGenerator
+from unittest.mock import patch
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from httpx import AsyncClient, ASGITransport
@@ -26,6 +29,62 @@ from app.core.limiter import limiter
 limiter.enabled = False
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
+_UPLOADS_WORKSPACES_DIR = Path("uploads/workspaces")
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_local_upload_files():
+    """Remove any files s3_storage_service falls back to writing under
+    uploads/workspaces/ during a test (no AWS credentials configured in
+    the test environment). Prevents test runs from leaving disk artifacts
+    behind on every pytest invocation. Tracks individual files (not just
+    top-level workspace directories) so new files written inside an
+    already-existing workspace folder are still caught."""
+    before = set(_UPLOADS_WORKSPACES_DIR.rglob("*")) if _UPLOADS_WORKSPACES_DIR.exists() else set()
+    yield
+    if not _UPLOADS_WORKSPACES_DIR.exists():
+        return
+    after = set(_UPLOADS_WORKSPACES_DIR.rglob("*"))
+    for entry in sorted(after - before, key=lambda p: len(p.parts), reverse=True):
+        if not entry.exists():
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+
+@pytest.fixture(autouse=True)
+def _reset_dependency_overrides():
+    """Guarantee app.dependency_overrides is empty before and after every test.
+
+    Several tests mutate app.dependency_overrides[get_current_user] directly
+    via a local `authenticate_as()`/`_mock_current_user` helper instead of
+    going through the `client` fixture's teardown. Relying solely on that
+    fixture's clear() makes cleanup dependent on test/fixture ordering; this
+    autouse fixture removes that dependency so an override set in one test
+    can never leak into another regardless of execution order.
+    """
+    app.dependency_overrides.clear()
+    yield
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def stub_enqueue_email_job():
+    """Replace the fire-and-forget transactional email dispatcher with a
+    plain Mock so registration/password-reset flows don't spawn real
+    background asyncio tasks that attempt live SMTP connections during
+    tests. Autoused below; request this fixture by name in a test to
+    assert on how it was called."""
+    with patch("app.services.auth_service.enqueue_email_job") as mock_enqueue:
+        yield mock_enqueue
+
+
+@pytest.fixture(autouse=True)
+def _autouse_stub_enqueue_email_job(stub_enqueue_email_job):
+    yield stub_enqueue_email_job
+
 
 @pytest_asyncio.fixture
 async def test_engine():
