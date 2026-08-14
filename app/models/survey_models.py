@@ -55,8 +55,10 @@ class UpdateSurveyRequest(BaseModel):
 class SurveyResponse(BaseModel):
     """Returned for a single survey."""
     id: int
+    survey_id: Optional[int] = None
     user_id: int
     workspace_id: int
+    public_token: str
     survey_link: Optional[str] = None
     questions: List[SurveyQuestionItem] = Field(default_factory=list)
     created_at: datetime
@@ -64,6 +66,11 @@ class SurveyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="after")
+    def set_survey_id(self) -> "SurveyResponse":
+        self.survey_id = self.id
+        return self
 
 
 class SurveyListResponse(BaseModel):
@@ -95,7 +102,8 @@ class SubmitPublicSurveyResponse(BaseModel):
 
 class PublicSurveyDetailResponse(BaseModel):
     """Public details of a survey for external respondents (no auth needed)."""
-    surveyId: str = Field(..., description="Opaque public survey token")
+    surveyId: int = Field(..., description="Internal survey ID")
+    publicToken: str = Field(..., description="Opaque public survey token")
     workspaceName: str
     questions: List[SurveyQuestionItem]
 

@@ -525,7 +525,8 @@ async def test_get_public_survey_success(client: AsyncClient, db_session: AsyncS
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert data["surveyId"] == survey.public_token
+    assert data["surveyId"] == survey.id
+    assert data["publicToken"] == survey.public_token
     assert data["workspaceName"] == "Public Workspace"
     assert len(data["questions"]) == 2
 

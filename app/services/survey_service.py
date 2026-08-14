@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 class SurveyService:
 
+    @staticmethod
+    def _mask_token(token: str) -> str:
+        """Mask a public survey token for safe logging, keeping only the last 4 characters."""
+        if not token:
+            return token
+        return f"***{token[-4:]}" if len(token) > 4 else "***"
+
     async def sync_survey_from_validation_result(
         self,
         user_id: int,
@@ -161,8 +168,8 @@ class SurveyService:
         await db.flush()
 
         if not survey.survey_link:
-            base_url = os.getenv("PUBLIC_APP_URL", "http://localhost:8000")
-            survey.survey_link = f"{base_url.rstrip('/')}/api/v1/surveys/public/{survey.public_token}"
+            base_url = os.getenv("PUBLIC_APP_URL", "https://qa.axiorapulse.com")
+            survey.survey_link = f"{base_url.rstrip('/')}/surveys/public/{survey.public_token}"
             await db.flush()
 
         await db.refresh(survey)
@@ -364,7 +371,7 @@ class SurveyService:
         db: AsyncSession,
     ) -> PublicSurveyDetailResponse:
         """Retrieve public details of a survey for external respondents without login."""
-        logger.info("Public survey requested: token=%s", token)
+        logger.info("Public survey requested: token=%s", self._mask_token(token))
         result = await db.execute(select(Survey).where(Survey.public_token == token))
         survey = result.scalar_one_or_none()
 
@@ -381,7 +388,8 @@ class SurveyService:
         questions_list = [SurveyQuestionItem(**q) if isinstance(q, dict) else q for q in survey.questions]
 
         return PublicSurveyDetailResponse(
-            surveyId=survey.public_token,
+            surveyId=survey.id,
+            publicToken=survey.public_token,
             workspaceName=ws_name,
             questions=questions_list,
         )
