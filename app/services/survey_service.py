@@ -169,7 +169,7 @@ class SurveyService:
         await db.flush()
 
         if not survey.survey_link:
-            base_url = os.getenv("PUBLIC_APP_URL", "https://qa.axiorapulse.com")
+            base_url = os.getenv("PUBLIC_APP_URL")
             survey.survey_link = f"{base_url.rstrip('/')}/surveys/public/{survey.public_token}"
             await db.flush()
 
@@ -433,7 +433,7 @@ class SurveyService:
         )
 
         # Automatic trigger: Auto-sync post-link response analysis in background (min 1 response)
-        asyncio.create_task(self._auto_run_post_link_analysis_bg(survey_id))
+        asyncio.create_task(self._auto_run_post_link_analysis_bg(survey.id))
 
         return SubmitPublicSurveyResponse(
             responseId=response_record.id,
