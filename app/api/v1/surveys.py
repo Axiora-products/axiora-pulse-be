@@ -32,6 +32,7 @@ from app.models.survey_models import (
     SaveAllSurveyQuestionsRequest,
     SubmitPublicSurveyRequest,
     SubmitPublicSurveyResponse,
+    SurveyAnalysisResponse,
     SurveyListResponse,
     SurveyResponse,
     SurveyResponsesListResponse,
@@ -228,3 +229,51 @@ async def get_survey_responses(
     db: AsyncSession = Depends(get_db),
 ) -> SurveyResponsesListResponse:
     return await survey_service.get_survey_responses(survey_id, current_user, db)
+
+
+# ── Run Post-Link Response Intelligence Analysis (SI.11–SI.44)
+@router.post(
+    "/{survey_id}/analyze",
+    response_model=SurveyAnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Run post-survey-link response intelligence analysis",
+    description="Triggers the Survey Intelligence Agent to evaluate collected responses across fraud detection, quality scoring, customer intelligence, customer validation, and GTM handoff (SI.11–SI.44). Requires at least 1 response.",
+)
+@limiter.limit("10/minute")
+async def analyze_survey(
+    request: Request,
+    survey_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SurveyAnalysisResponse:
+    result = await survey_service.run_post_link_analysis(survey_id, current_user, db)
+    return SurveyAnalysisResponse(
+        survey_id=survey_id,
+        status="success",
+        analysis_result=result,
+    )
+
+
+# ── Get Stored Post-Link Analysis Result
+@router.get(
+    "/{survey_id}/analysis",
+    response_model=SurveyAnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get saved post-link analysis result",
+    description="Retrieves the saved SI.11–SI.44 post-link response intelligence analysis for a survey.",
+)
+@limiter.limit("60/minute")
+async def get_survey_analysis(
+    request: Request,
+    survey_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SurveyAnalysisResponse:
+    survey = await survey_service.get_survey_by_id(survey_id, current_user, db)
+    analysis = survey.analysis_result or {}
+    return SurveyAnalysisResponse(
+        survey_id=survey_id,
+        status="success",
+        analysis_result=analysis,
+    )
+
