@@ -58,7 +58,10 @@ class UserLoginRequest(BaseModel):
 
 class VerifyOTPRequest(BaseModel):
     """Payload for POST /api/v1/auth/verifyOTP."""
-    id: Optional[Union[int, str]] = None
+    id: Optional[Union[int, str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("id", "userid")
+    )
     emailOrMobile: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("emailOrMobile", "email", "username", "mobile")
@@ -80,7 +83,10 @@ class VerifyOTPRequest(BaseModel):
 
 class ResendOTPRequest(BaseModel):
     """Payload for POST /api/v1/auth/resendOTP."""
-    id: Optional[Union[int, str]] = None
+    id: Optional[Union[int, str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("id", "userid")
+    )
     emailOrMobile: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("emailOrMobile", "email", "username", "mobile")
@@ -105,10 +111,10 @@ class AuthActionsData(BaseModel):
     """Post-login gate flags returned on every successful regular-user login.
 
     payment              – True  when the user has completed payment (default: True)
-    interactive_questions – True  when the user has answered onboarding questions (default: False)
+    interactive_questions – True  when the user has answered onboarding questions (default: True)
     """
     payment: bool = True
-    interactive_questions: bool = False
+    interactive_questions: bool = True
 
 class RegisterResponse(BaseModel):
     """Returned after successful registration or OTP resend."""

@@ -182,12 +182,12 @@ async def _get_or_create_auth_actions(user_id: int, db: AsyncSession) -> AuthAct
 
     Defaults:
         payment              = True   (assume payment completed)
-        interactive_questions = False  (onboarding not yet completed)
+        interactive_questions = True  (assume onboarding completed)
     """
     result = await db.execute(select(AuthActions).where(AuthActions.user_id == user_id))
     row = result.scalar_one_or_none()
     if row is None:
-        row = AuthActions(user_id=user_id, payment=True, interactive_questions=False)
+        row = AuthActions(user_id=user_id, payment=True, interactive_questions=True)
         db.add(row)
         await db.flush()
         logger.info("Created auth_actions row for user_id=%s with defaults.", user_id)
