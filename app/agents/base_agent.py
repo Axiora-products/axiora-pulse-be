@@ -19,6 +19,7 @@ from typing import Any, Callable, Awaitable
 
 from app.llm.llm_gateway import LLMGateway, LLMRequest, LLMResponse
 from app.models.agent_models import AgentInput, AgentOutput, AgentStatus
+from app.services.research_trace_service import research_trace_service
 from app.skills.skill_registry import Skill, skill_registry
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,12 @@ class BaseAgent(ABC):
         """
         logger.info(f"[{self.agent_name}] ▶ Starting execution (stream={stream})")
         executed_at = datetime.utcnow()
+
+        # Update current agent context for research trace service
+        research_trace_service.set_context(
+            run_id=research_trace_service.get_context_run_id(),
+            agent_name=self.agent_name,
+        )
 
         # Step 1: Ensure skill is available
         if not self.skill:
@@ -159,6 +166,17 @@ class BaseAgent(ABC):
 
         confidence = float(parsed.get("confidence", 0.5))
         confidence = max(0.0, min(1.0, confidence))
+
+        # Step 6: Harvest research_sources from parsed output and log to trace service
+        for src in parsed.get("research_sources", []):
+            if isinstance(src, dict) and src.get("url"):
+                await research_trace_service.log_source(
+                    url=src["url"],
+                    title=src.get("title"),
+                    snippet=src.get("snippet"),
+                )
+            elif isinstance(src, str) and src.startswith("http"):
+                await research_trace_service.log_source(url=src)
 
         logger.info(
             f"[{self.agent_name}] ✓ Done — score={score:.1f} confidence={confidence:.2f} "
