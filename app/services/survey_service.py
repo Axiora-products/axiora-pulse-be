@@ -1,4 +1,5 @@
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -168,7 +169,7 @@ class SurveyService:
         await db.flush()
 
         if not survey.survey_link:
-            base_url = os.getenv("PUBLIC_APP_URL", "https://qa.axiorapulse.com")
+            base_url = os.getenv("PUBLIC_APP_URL")
             survey.survey_link = f"{base_url.rstrip('/')}/surveys/public/{survey.public_token}"
             await db.flush()
 
@@ -431,6 +432,9 @@ class SurveyService:
             response_record.id, survey.id, payload.respondentEmail
         )
 
+        # Automatic trigger: Auto-sync post-link response analysis in background (min 1 response)
+        asyncio.create_task(self._auto_run_post_link_analysis_bg(survey.id))
+
         return SubmitPublicSurveyResponse(
             responseId=response_record.id,
             message="Thank you! Your survey response has been submitted.",
@@ -462,6 +466,122 @@ class SurveyService:
             total_responses=len(responses),
             responses=[SingleSurveyResponseItem.model_validate(r) for r in responses],
         )
+
+    async def run_post_link_analysis(
+        self,
+        survey_id: int,
+        current_user: User,
+        db: AsyncSession,
+    ) -> dict:
+        """
+        Runs post-survey-link response intelligence analysis (SI.11–SI.44)
+        for a survey owned by current_user. Requires at least 1 collected response.
+        Saves result to survey.analysis_result in DB.
+        """
+        survey_db_res = await db.execute(select(Survey).where(Survey.id == survey_id))
+        survey = survey_db_res.scalar_one_or_none()
+
+        if survey is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Survey {survey_id} not found.",
+            )
+        if survey.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access this survey.",
+            )
+
+        result = await db.execute(
+            select(PublicSurveyResponse)
+            .where(PublicSurveyResponse.survey_id == survey_id)
+            .order_by(PublicSurveyResponse.submitted_at.asc())
+        )
+        responses = result.scalars().all()
+
+        if len(responses) < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Minimum threshold not met: At least 1 survey response is required to run post-link analysis.",
+            )
+
+        resp_data = [
+            {
+                "response_id": r.id,
+                "respondent_email": r.respondent_email,
+                "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+                "answers": r.answers,
+            }
+            for r in responses
+        ]
+
+        from app.agents.survey_intelligence_agent import SurveyIntelligenceAgent
+        from app.llm.llm_gateway import get_llm_gateway
+
+        agent = SurveyIntelligenceAgent(get_llm_gateway())
+
+        analysis = await agent.run_post_link_analysis(
+            survey_id=str(survey.id),
+            survey_title="Customer Validation Survey",
+            survey_objective="Validate core problem statement and customer demand",
+            questions=survey.questions or [],
+            responses=resp_data,
+        )
+
+        survey.analysis_result = analysis
+        survey.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(survey)
+
+        logger.info("Post-link intelligence analysis completed and saved for survey_id=%s", survey_id)
+        return analysis
+
+    async def _auto_run_post_link_analysis_bg(self, survey_id: int) -> None:
+        """Background task to auto-trigger post-link intelligence analysis on new response submission."""
+        try:
+            from app.db.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                survey_res = await db.execute(select(Survey).where(Survey.id == survey_id))
+                survey = survey_res.scalar_one_or_none()
+                if not survey:
+                    return
+
+                resp_res = await db.execute(
+                    select(PublicSurveyResponse).where(PublicSurveyResponse.survey_id == survey_id)
+                )
+                responses = resp_res.scalars().all()
+                if len(responses) < 1:
+                    return
+
+                resp_data = [
+                    {
+                        "response_id": r.id,
+                        "respondent_email": r.respondent_email,
+                        "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+                        "answers": r.answers,
+                    }
+                    for r in responses
+                ]
+
+                from app.agents.survey_intelligence_agent import SurveyIntelligenceAgent
+                from app.llm.llm_gateway import get_llm_gateway
+
+                agent = SurveyIntelligenceAgent(get_llm_gateway())
+                analysis = await agent.run_post_link_analysis(
+                    survey_id=str(survey.id),
+                    survey_title="Customer Validation Survey",
+                    survey_objective="Validate core problem statement and customer demand",
+                    questions=survey.questions or [],
+                    responses=resp_data,
+                )
+
+                survey.analysis_result = analysis
+                survey.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info("Auto post-link analysis updated in background for survey_id=%s", survey_id)
+        except Exception as e:
+            logger.warning("Background post-link analysis failed for survey_id=%s: %s", survey_id, e)
+
 
 
 # Singleton

@@ -60,6 +60,7 @@ class SurveyResponse(BaseModel):
     public_token: str
     survey_link: Optional[str] = None
     questions: List[SurveyQuestionItem] = Field(default_factory=list)
+    analysis_result: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
@@ -71,6 +72,14 @@ class SurveyListResponse(BaseModel):
     """Returned for a list of surveys."""
     total: int
     surveys: List[SurveyResponse]
+
+
+class SurveyAnalysisResponse(BaseModel):
+    """Returned for post-survey-link response intelligence analysis (SI.11–SI.44)."""
+    survey_id: int
+    status: str = "success"
+    analysis_result: dict
+
 
 
 # ── Public Survey Models ────────────────────────────────────────────────────────

@@ -81,6 +81,10 @@ class BaseAgent(ABC):
             logger.error(f"[{self.agent_name}] Prompt build failed: {e}")
             return self._failed_output(f"Prompt build error: {e}", executed_at=executed_at)
 
+        # Fetch allowed tool definitions for this agent
+        from app.mcp.tool_registry import mcp_tool_registry
+        agent_tools = mcp_tool_registry.get_openai_tool_definitions(caller_agent=self.agent_name)
+
         # Step 3: Call LLM Gateway (with streaming if enabled)
         llm_request = LLMRequest(
             system_prompt=(
@@ -93,7 +97,10 @@ class BaseAgent(ABC):
             temperature=0.3,
             max_tokens=self.max_tokens,
             stream=stream or (stream_callback is not None),
+            tools=agent_tools if agent_tools else None,
+            caller_agent=self.agent_name,
         )
+
 
         try:
             if stream_callback:
