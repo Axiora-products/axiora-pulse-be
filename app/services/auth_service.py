@@ -206,8 +206,13 @@ class AuthService:
     ) -> RegisterResponse:
         """Create a new user, generate OTP, and trigger the OTP email.
 
+        If an account with the same email already exists but OTP verification
+        has not been completed (register_mfa=False), a fresh OTP is generated
+        and re-dispatched so the user can resume the verification flow.
+
         Raises:
-            HTTPException 409 if the username is already registered.
+            HTTPException 409 if the account is already fully registered
+                          (register_mfa=True).
         """
         if isinstance(request, dict):
             request = UserRegisterRequest(**request)
@@ -216,7 +221,34 @@ class AuthService:
 
         existing = await _get_user_by_username(db, username)
         if existing is not None:
-            logger.warning("Duplicate registration attempt for: %s", username)
+            # ── Account exists but OTP verification is still pending ──────────
+            if not existing.register_mfa:
+                logger.info(
+                    "Re-registration attempt for unverified account: %s (id=%s). "
+                    "Refreshing OTP and redirecting to verification flow.",
+                    username, existing.id,
+                )
+                # Regenerate a fresh OTP so the previous (possibly expired) one
+                # is replaced and the user can complete verification.
+                otp = generate_otp()
+                expiry = otp_expiry()
+                existing.register_otp = otp
+                existing.register_otp_expiry = expiry
+                existing.register_otp_attempts = 0
+                await db.flush()
+
+                result = await dispatch_otp(username, otp)
+                if not result.success:
+                    logger.warning(
+                        "OTP re-dispatch failed for pending account %s: %s",
+                        username, result.error,
+                    )
+                    # Do not raise — client can call /resendOTP.
+
+                return _to_register_response(existing)
+
+            # ── Account is fully registered ───────────────────────────────────
+            logger.warning("Duplicate registration attempt for verified account: %s", username)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="An account with this email already exists.",
