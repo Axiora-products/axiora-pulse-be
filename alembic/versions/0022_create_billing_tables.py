@@ -9,6 +9,7 @@ placeholder rows. The `razorpay_plan_id_*` columns are left NULL — fill them i
 (via SQL or an admin update) once the matching Plans are created in the Razorpay
 dashboard.
 """
+from datetime import datetime, timezone
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -135,7 +136,9 @@ def upgrade() -> None:
         sa.column("created_at", sa.DateTime(timezone=True)),
         sa.column("updated_at", sa.DateTime(timezone=True)),
     )
-    now = sa.func.now()
+    # A concrete datetime, not sa.func.now(): op.bulk_insert binds these as
+    # executemany parameters, and asyncpg rejects a SQL function object there.
+    now = datetime.now(timezone.utc)
     op.bulk_insert(
         plans_table,
         [
