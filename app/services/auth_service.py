@@ -398,6 +398,7 @@ class AuthService:
                 display_name=user.display_name,
             )
 
+            auth_actions_row = await _get_or_create_auth_actions(user.id, db)
             actions = ["dashboard"] if user.role == "admin" else []
             return VerifyOTPResponse(
                 status="success",
@@ -408,6 +409,10 @@ class AuthService:
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
                 role=user.role,
                 actions=actions,
+                auth_actions=AuthActionsData(
+                    payment=auth_actions_row.payment,
+                    interactive_questions=auth_actions_row.interactive_questions,
+                ),
             )
 
     # ── Resend OTP ─────────────────────────────────────────────────────────────

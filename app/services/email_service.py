@@ -396,7 +396,7 @@ async def send_login_otp_email(to_email: str, otp: int) -> OTPResult:
 def _build_registration_success_email(to_email: str, display_name: Optional[str] = None) -> MIMEMultipart:
     """Construct the branded 'account created' welcome email."""
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Welcome to Axiora Pulse — Your Account is Ready"
+    msg["Subject"] = "Welcome to Axiora Pulse. Your Account is Ready"
     msg["From"] = f"{_SMTP_FROM_NAME} <{_SMTP_FROM_EMAIL}>"
     msg["To"] = to_email
 
