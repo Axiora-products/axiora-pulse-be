@@ -410,7 +410,6 @@ class AuthService:
                 role=user.role,
                 actions=actions,
                 auth_actions=AuthActionsData(
-                    payment=auth_actions_row.payment,
                     interactive_questions=auth_actions_row.interactive_questions,
                 ),
             )
