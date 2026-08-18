@@ -88,7 +88,7 @@ class AuthActions(Base):
     """Per-user auth-gate flags returned on every successful regular-user login.
 
     payment              – True  → user has completed payment (default: True)
-    interactive_questions – False → user has not yet answered onboarding questions (default: False)
+    interactive_questions – True → user has answered onboarding questions (default: True)
     """
 
     __tablename__ = "auth_actions"
@@ -104,7 +104,7 @@ class AuthActions(Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
     interactive_questions: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="false"
+        Boolean, nullable=False, default=True, server_default="true"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
