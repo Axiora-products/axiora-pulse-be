@@ -116,6 +116,15 @@ class AuthActionsData(BaseModel):
     payment: bool = True
     interactive_questions: bool = True
 
+
+class RegisterAuthActionsData(BaseModel):
+    """Post-registration gate flags returned on OTP verification for the register flow.
+
+    interactive_questions – True  when the user has answered onboarding questions (default: True)
+    """
+    interactive_questions: bool = True
+
+
 class RegisterResponse(BaseModel):
     """Returned after successful registration or OTP resend."""
     userid: int
@@ -133,7 +142,7 @@ class VerifyOTPResponse(BaseModel):
     expires_in_minutes: Optional[int] = None
     role: Optional[str] = None              # Present only on success
     actions: List[str] = Field(default_factory=list)  # Present only on success
-    auth_actions: Optional[AuthActionsData] = None    # Post-login gate flags (regular users only)
+    auth_actions: Optional[Union[AuthActionsData, RegisterAuthActionsData]] = None    # Post-login/register gate flags (regular users only)
 
 
 class LoginSuccessResponse(BaseModel):
