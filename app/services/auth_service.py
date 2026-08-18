@@ -46,6 +46,7 @@ from app.db.models import AuthActions, RefreshSession, User
 from app.models.auth_models import (
     AdminLoginResponse,
     AuthActionsData,
+    RegisterAuthActionsData,
     LoginSuccessResponse,
     RegisterResponse,
     ResendOTPRequest,
@@ -409,7 +410,7 @@ class AuthService:
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
                 role=user.role,
                 actions=actions,
-                auth_actions=AuthActionsData(
+                auth_actions=RegisterAuthActionsData(
                     interactive_questions=auth_actions_row.interactive_questions,
                 ),
             )
