@@ -8,6 +8,7 @@ import logging
 from typing import Any
 from app.services.web_search_service import web_search_service
 from app.services.web_scraper_service import web_scraper_service
+from app.services.research_trace_service import research_trace_service
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,21 @@ async def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
     industry trends, or customer data.
     """
     logger.info(f"[MCP Tool: web_search] Executing query: '{query}'")
-    return await web_search_service.search(query, max_results=max_results)
+    await research_trace_service.log_query(query=query)
+    
+    search_res = await web_search_service.search(query, max_results=max_results)
+    
+    results = search_res.get("results", [])
+    if isinstance(results, list):
+        for item in results:
+            if isinstance(item, dict) and item.get("url"):
+                await research_trace_service.log_source(
+                    url=item["url"],
+                    title=item.get("title"),
+                    snippet=item.get("snippet"),
+                )
+
+    return search_res
 
 
 async def scrape_webpage(url: str, max_length: int = 4000) -> dict[str, Any]:
@@ -26,7 +41,17 @@ async def scrape_webpage(url: str, max_length: int = 4000) -> dict[str, Any]:
     Fetch and extract full body text content from a specific web page URL.
     """
     logger.info(f"[MCP Tool: scrape_webpage] Scraping URL: '{url}'")
-    return await web_scraper_service.scrape_webpage(url, max_length=max_length)
+    scrape_res = await web_scraper_service.scrape_webpage(url, max_length=max_length)
+
+    text_content = scrape_res.get("content", "")
+    snippet = text_content[:200] + "…" if len(text_content) > 200 else text_content
+    await research_trace_service.log_source(
+        url=url,
+        title=scrape_res.get("title") or f"Webpage ({url})",
+        snippet=snippet,
+    )
+
+    return scrape_res
 
 
 # ── OpenAI Function Calling Definitions ─────────────────────────────────────
