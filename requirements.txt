@@ -30,4 +30,5 @@ PyMuPDF>=1.24.0
 tzdata>=2024.1
 ddgs
 duckduckgo-search>=6.0.0
+razorpay>=1.4.2
 
