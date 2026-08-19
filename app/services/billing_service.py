@@ -11,6 +11,7 @@ Design:
     `verify` path is treated as a best-effort hint, never the source of truth.
 """
 import logging
+import os
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -29,6 +30,18 @@ logger = logging.getLogger(__name__)
 _NON_TERMINAL = {"created", "authenticated", "active", "pending", "halted"}
 # Statuses that grant paid entitlement.
 _ENTITLED = {"active", "authenticated"}
+
+# Feature flag — when false, the payment gate is bypassed and every user is treated
+# as entitled. Intended for LOCAL DEVELOPMENT so developers can reach subscription-
+# gated features without configuring Razorpay keys, plans, or webhooks/ngrok.
+#
+# Defaults to TRUE (secure by default). The gate is bypassed ONLY when the value is
+# an explicit falsey token — so a missing OR malformed value (e.g. a typo like
+# "flase") still ENFORCES, and a forgotten flag can never silently open QA/production.
+# Set `SUBSCRIPTION_ENFORCED=false` in a local .env only.
+SUBSCRIPTION_ENFORCED = os.getenv("SUBSCRIPTION_ENFORCED", "true").strip().lower() not in (
+    "false", "0", "f", "no", "n", "off",
+)
 
 
 def _epoch_to_dt(value) -> datetime | None:
@@ -304,7 +317,16 @@ class BillingService:
         )
 
     async def has_active_entitlement(self, user: User, db: AsyncSession) -> bool:
-        """True if the user currently holds a paid, entitled subscription."""
+        """True if the user currently holds a paid, entitled subscription.
+
+        When `SUBSCRIPTION_ENFORCED` is disabled (local dev), the gate is bypassed
+        and every user is treated as entitled. This is the single chokepoint used
+        both by the auth-response `hasActivePlan` and the `require_active_subscription`
+        dependency, so one flag flips the entire payment gate.
+        """
+        if not SUBSCRIPTION_ENFORCED:
+            return True
+
         row = (
             await db.execute(
                 select(Subscription.id).where(
