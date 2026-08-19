@@ -93,6 +93,17 @@ async def lifespan(app: FastAPI):
     # Validate that the configured LLM provider credentials exist
     _validate_provider_config()
 
+    # Surface the subscription/payment gate state loudly — a shared environment
+    # (QA/prod) running with enforcement OFF would let everyone bypass payment.
+    from app.services.billing_service import SUBSCRIPTION_ENFORCED
+    if SUBSCRIPTION_ENFORCED:
+        logger.info("Subscription enforcement: ENABLED")
+    else:
+        logger.warning(
+            "⚠  SUBSCRIPTION ENFORCEMENT DISABLED — all users are treated as paid. "
+            "For LOCAL DEV only; never run QA/production with SUBSCRIPTION_ENFORCED=false."
+        )
+
     logger.info("Server is ready.")
     if DEBUG:
         logger.info(f"  Docs  →  http://localhost:8000/docs")
