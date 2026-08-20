@@ -83,7 +83,7 @@ async def update_current_user_profile(
     return CurrentUserEnvelope(data=_to_current_user(current_user, details))
 
 
-# ── Extended profile ("user_details") ───────────────────────────────────────────
+# Extended profile ("user_details") 
 
 @users_router.post(
     "/me/details",

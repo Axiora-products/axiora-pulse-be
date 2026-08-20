@@ -73,7 +73,6 @@ class UpdateUserDetailsRequest(BaseModel):
     mobile_number: Optional[str] = None
     date_of_birth: Optional[date] = None
     gender: Optional[str] = Field(None, max_length=20)
-    profile_status: Optional[Literal["Active", "Inactive", "Suspended"]] = None
     nationality: Optional[str] = Field(None, max_length=100)
     communication_preferences: Optional[List[Literal["Email", "SMS", "Push"]]] = None
 
