@@ -86,7 +86,7 @@ class UserDetails(Base):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     mobile_number: Mapped[str] = mapped_column(String(20), nullable=False)
-    date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
     profile_status: Mapped[str] = mapped_column(String(20), nullable=False, default="Active")
     nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
