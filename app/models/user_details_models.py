@@ -42,7 +42,7 @@ class CreateUserDetailsRequest(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     email: Optional[EmailStr] = Field(None, description="Defaults to the account's login email (users.username) when omitted")
     mobile_number: str = Field(..., description="10-digit Indian mobile number, optionally prefixed with +91")
-    date_of_birth: date
+    date_of_birth: Optional[date] = None
     gender: Optional[str] = Field(None, max_length=20)
     nationality: Optional[str] = Field(None, max_length=100)
     communication_preferences: List[Literal["Email", "SMS", "Push"]] = Field(default_factory=list)
@@ -54,8 +54,8 @@ class CreateUserDetailsRequest(BaseModel):
 
     @field_validator("date_of_birth")
     @classmethod
-    def validate_date_of_birth(cls, value: date) -> date:
-        if value >= date.today():
+    def validate_date_of_birth(cls, value: date | None) -> date | None:
+        if value is not None and value >= date.today():
             raise ValueError("Date of birth must be in the past.")
         return value
 
@@ -109,7 +109,7 @@ class UserDetailsResponse(BaseModel):
     last_name: str
     email: str
     mobile_number: str
-    date_of_birth: date
+    date_of_birth: Optional[date] = None
     gender: Optional[str] = None
     profile_status: str
     nationality: Optional[str] = None
