@@ -1,11 +1,13 @@
 """SQLAlchemy ORM models for users, workspace, agents, and orchestration system."""
-from datetime import datetime
+from datetime import date, datetime
 import uuid
 
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.core.timezone import now_ist
 
 
 class Base(DeclarativeBase):
@@ -66,6 +68,39 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r} role={self.role!r}>"
+
+
+class UserDetails(Base):
+    __tablename__ = "user_details"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    profile_id: Mapped[str] = mapped_column(
+        String(20), unique=True, nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True
+    )
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    mobile_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
+    gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    profile_status: Mapped[str] = mapped_column(String(20), nullable=False, default="Active")
+    nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    communication_preferences: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    last_login_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_ist
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_ist, onupdate=now_ist
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserDetails id={self.id} profile_id={self.profile_id!r} user_id={self.user_id}>"
 
 
 class RefreshSession(Base):

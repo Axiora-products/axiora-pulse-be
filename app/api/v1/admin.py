@@ -10,7 +10,9 @@ from app.core.limiter import limiter
 from app.db.database import get_db
 from app.db.models import User
 from app.models.admin_models import AdminSurveyListResponse, AdminUserListResponse, UserGrowthResponse
+from app.models.user_details_models import SetProfileStatusRequest, UserDetailsResponse
 from app.services.admin_service import admin_service
+from app.services.user_details_service import user_details_service
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -45,6 +47,19 @@ async def list_surveys(
     Pass `user_id` to view a single user's surveys instead of everyone's.
     """
     return await admin_service.list_surveys(db, limit, offset, search, user_id)
+
+
+@router.patch("/user-details/{user_id}/status", response_model=UserDetailsResponse)
+@limiter.limit("30/minute")
+async def set_user_details_status(
+    request: Request,
+    user_id: int,
+    payload: SetProfileStatusRequest,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserDetailsResponse:
+    """Set a user's profile_status (Active/Inactive/Suspended) in user_details, by user_id."""
+    return await user_details_service.set_status_by_user_id(user_id, payload.profile_status, db)
 
 
 @router.get("/stats/user-growth", response_model=UserGrowthResponse)
