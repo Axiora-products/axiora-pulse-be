@@ -1,0 +1,71 @@
+# axiora-pulse-be/.github/workflows/deploy-dev.yml
+name: Deploy dev
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev-be
+  cancel-in-progress: false
+
+jobs:
+  # Build the image once and push it to ECR (sha-<sha> + moving qa tag).
+  build:
+    uses: ./.github/workflows/ci-build-push.yml
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      image_name: axiora-pulse-be
+      extra_tags: qa
+
+  # Deploy that exact image to the QA box by PULLING it — no build on the box.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy image to QA
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          IMAGE_TAG: ${{ needs.build.outputs.sha_tag }}
+          REGISTRY: ${{ vars.ECR_REGISTRY }}
+          REGION: ${{ vars.AWS_REGION }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes "ubuntu@$HOST" bash -s <<EOF
+            set -euo pipefail
+            cd /opt/axiora
+            # Pin the box to the exact image CI just built.
+            sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" .env
+            aws ecr get-login-password --region ${REGION} \
+              | docker login --username AWS --password-stdin ${REGISTRY}
+            docker compose pull api
+            docker compose up -d api
+          EOF
+
+      - name: Health check
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          for i in $(seq 1 30); do
+            if ssh -i ~/.ssh/id_ed25519 "ubuntu@$HOST" \
+                 'docker compose -f /opt/axiora/docker-compose.yml exec -T api curl -fsS localhost:8000/health' 2>/dev/null; then
+              echo "API healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "API did not become healthy. Logs:" >&2
+          ssh -i ~/.ssh/id_ed25519 "ubuntu@$HOST" \
+            'docker compose -f /opt/axiora/docker-compose.yml logs --tail 80 api' >&2
+          exit 1

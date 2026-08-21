@@ -141,3 +141,26 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+ 
+#docs
+docs/
+scratch_test.py
+#frontend
+frontend/html/
+index.html
+#venv
+venv
+#_pycache_
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+
+#Test coverage
+.coverage
+pytest.ini
+coverage.xml
+
+#uploads 
+backend/uploads
+uploads/
