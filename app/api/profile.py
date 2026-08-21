@@ -1,5 +1,5 @@
 """Compatibility routes for the existing SPA user-profile contract."""
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,17 +88,21 @@ async def update_current_user_profile(
 @users_router.post(
     "/me/details",
     response_model=UserDetailsResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create the current user's extended profile",
+    summary="Create or update the current user's extended profile",
 )
 @limiter.limit("20/minute")
-async def create_user_details(
+async def upsert_user_details(
     request: Request,
+    response: Response,
     payload: CreateUserDetailsRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserDetailsResponse:
-    return await user_details_service.create(payload, current_user, db)
+    """Upsert: creates the profile if none exists yet, otherwise overwrites it with
+    the given fields. Returns 201 on create, 200 on update."""
+    result, created = await user_details_service.upsert(payload, current_user, db)
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return result
 
 
 @users_router.get(
