@@ -11,6 +11,12 @@ from app.db.database import get_db
 from app.db.models import User
 from app.models.admin_models import (
     AdminSurveyListResponse,
+    AdminUserListResponse,
+    AdminUserSurveySummaryResponse,
+    UserGrowthResponse,
+)
+from app.models.admin_models import (
+    AdminSurveyListResponse,
     AdminSurveyResponseDetailResponse,
     AdminSurveyResponsesListResponse,
     AdminUserListResponse,
@@ -54,6 +60,20 @@ async def list_surveys(
     Pass `user_id` to view a single user's surveys instead of everyone's.
     """
     return await admin_service.list_surveys(db, limit, offset, search, user_id)
+
+
+@router.get("/users/{user_id}/survey-summary", response_model=AdminUserSurveySummaryResponse)
+@limiter.limit("60/minute")
+async def get_user_survey_summary(
+    request: Request,
+    user_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserSurveySummaryResponse:
+    """
+    Get a summary of a user's surveys and responses, for the administrator dashboard.
+    """
+    return await admin_service.get_user_survey_summary(db, user_id)
 
 
 @router.get("/surveys/{survey_id}/responses", response_model=AdminSurveyResponsesListResponse)

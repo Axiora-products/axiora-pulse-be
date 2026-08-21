@@ -1,6 +1,7 @@
 """Request and response schemas for the minimal administrator API."""
 
 from datetime import datetime
+from typing import Literal, Optional
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
@@ -43,6 +44,7 @@ class AdminSurveyResponse(BaseModel):
     workspace_id: int
     workspace_name: str
     workspace_description: Optional[str] = None
+    workspace_description: Optional[str] = None
     survey_link: str | None = None
     status: Literal["Active", "Closed"]
     question_count: int
@@ -64,6 +66,18 @@ class AdminUserSurveySummaryItem(BaseModel):
     responses_count: int
     created_at: datetime
     updated_at: datetime
+
+
+class AdminUserSurveySummaryResponse(BaseModel):
+    """Header summary for the admin "user detail" page (Users > <name>)."""
+
+    user_id: int
+    name: str
+    email: str
+    status: str
+    joined_on: datetime
+    surveys_created: int
+    total_responses: int
 
 
 class AdminUserSurveySummaryResponse(BaseModel):

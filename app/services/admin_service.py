@@ -24,6 +24,7 @@ from app.models.admin_models import (
     AdminUserResponse,
     AdminUserSurveySummaryResponse,
     AdminUserSurveySummaryItem,
+    AdminUserSurveySummaryResponse,
     UserGrowthPoint,
     UserGrowthResponse,
 )
@@ -135,6 +136,7 @@ class AdminService:
             len(rows), total, limit, offset, bool(search),
         )
         surveys = [
+
             self._build_admin_survey_response(
                 survey=survey,
                 owner_username=username,
@@ -321,6 +323,44 @@ class AdminService:
                 )
                 for survey, workspace_name, workspace_description, responses_count in survey_rows
             ],
+
+    async def get_user_survey_summary(
+        self, db: AsyncSession, user_id: int
+    ) -> AdminUserSurveySummaryResponse:
+        """Header summary for the admin 'user detail' page: name/email/status,
+        joined date, and aggregate survey/response counts for one user."""
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+        details = (
+            await db.execute(select(UserDetails).where(UserDetails.user_id == user_id))
+        ).scalar_one_or_none()
+        name = f"{details.first_name} {details.last_name}".strip() if details else (
+            user.display_name or user.username.split("@", 1)[0]
+        )
+        email = details.email if details else user.username
+        user_status = details.profile_status if details else "Active"
+
+        surveys_created = (
+            await db.execute(select(func.count(Survey.id)).where(Survey.user_id == user_id))
+        ).scalar_one()
+        total_responses = (
+            await db.execute(
+                select(func.count(PublicSurveyResponse.id))
+                .join(Survey, Survey.id == PublicSurveyResponse.survey_id)
+                .where(Survey.user_id == user_id)
+            )
+        ).scalar_one()
+
+        return AdminUserSurveySummaryResponse(
+            user_id=user.id,
+            name=name,
+            email=email,
+            status=user_status,
+            joined_on=user.created_at,
+            surveys_created=surveys_created,
+            total_responses=total_responses,
         )
 
     async def get_user_growth(
