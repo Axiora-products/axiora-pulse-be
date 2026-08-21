@@ -9,7 +9,12 @@ from app.core.dependencies import require_admin
 from app.core.limiter import limiter
 from app.db.database import get_db
 from app.db.models import User
-from app.models.admin_models import AdminSurveyListResponse, AdminUserListResponse, UserGrowthResponse
+from app.models.admin_models import (
+    AdminSurveyListResponse,
+    AdminUserListResponse,
+    AdminUserSurveySummaryResponse,
+    UserGrowthResponse,
+)
 from app.models.user_details_models import SetProfileStatusRequest, UserDetailsResponse
 from app.services.admin_service import admin_service
 from app.services.user_details_service import user_details_service
@@ -31,7 +36,7 @@ async def list_users(
     return await admin_service.list_users(db, limit, offset, search)
 
 
-@router.get("/surveys", response_model=AdminSurveyListResponse)
+@router.get("/users/surveys", response_model=AdminSurveyListResponse)
 @limiter.limit("60/minute")
 async def list_surveys(
     request: Request,
@@ -47,6 +52,20 @@ async def list_surveys(
     Pass `user_id` to view a single user's surveys instead of everyone's.
     """
     return await admin_service.list_surveys(db, limit, offset, search, user_id)
+
+
+@router.get("/users/{user_id}/survey-summary", response_model=AdminUserSurveySummaryResponse)
+@limiter.limit("60/minute")
+async def get_user_survey_summary(
+    request: Request,
+    user_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserSurveySummaryResponse:
+    """
+    Get a summary of a user's surveys and responses, for the administrator dashboard.
+    """
+    return await admin_service.get_user_survey_summary(db, user_id)
 
 
 @router.patch("/user-details/{user_id}/status", response_model=UserDetailsResponse)
