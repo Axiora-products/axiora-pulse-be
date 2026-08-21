@@ -1,6 +1,7 @@
 """Request and response schemas for the minimal administrator API."""
 
 from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -28,17 +29,38 @@ class AdminUserListResponse(BaseModel):
 
 
 class AdminSurveyResponse(BaseModel):
-    """Survey details displayed in the administrator directory, with owner info."""
+    """Survey details displayed in the administrator directory, with owner info.
+
+    `status` and `workspace_description` are inferred, not stored: status is
+    "Active" once a survey_link has been generated (else "Closed"/draft), and
+    workspace_description doubles as the survey's description since Survey
+    itself has no title/description/status columns of its own.
+    """
 
     id: int
     user_id: int
     owner_username: str
     workspace_id: int
     workspace_name: str
+    workspace_description: Optional[str] = None
     survey_link: str | None = None
+    status: Literal["Active", "Closed"]
     question_count: int
+    responses_count: int
     created_at: datetime
     updated_at: datetime
+
+
+class AdminUserSurveySummaryResponse(BaseModel):
+    """Header summary for the admin "user detail" page (Users > <name>)."""
+
+    user_id: int
+    name: str
+    email: str
+    status: str
+    joined_on: datetime
+    surveys_created: int
+    total_responses: int
 
 
 class AdminSurveyPagination(BaseModel):

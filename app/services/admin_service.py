@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Survey, User, Workspace
+from fastapi import HTTPException, status
+
+from app.db.models import PublicSurveyResponse, Survey, User, UserDetails, Workspace
 from app.models.admin_models import (
     AdminSurveyListResponse,
     AdminSurveyPagination,
@@ -14,6 +16,7 @@ from app.models.admin_models import (
     AdminUserListResponse,
     AdminUserPagination,
     AdminUserResponse,
+    AdminUserSurveySummaryResponse,
     UserGrowthPoint,
     UserGrowthResponse,
 )
@@ -89,11 +92,27 @@ class AdminService:
         if user_id is not None:
             filters.append(Survey.user_id == user_id)
 
+        responses_subq = (
+            select(
+                PublicSurveyResponse.survey_id.label("survey_id"),
+                func.count(PublicSurveyResponse.id).label("responses_count"),
+            )
+            .group_by(PublicSurveyResponse.survey_id)
+            .subquery()
+        )
+
         total_statement = select(func.count(Survey.id)).join(User, User.id == Survey.user_id)
         surveys_statement = (
-            select(Survey, User.username, Workspace.name)
+            select(
+                Survey,
+                User.username,
+                Workspace.name,
+                Workspace.description,
+                func.coalesce(responses_subq.c.responses_count, 0),
+            )
             .join(User, User.id == Survey.user_id)
             .join(Workspace, Workspace.id == Survey.workspace_id)
+            .outerjoin(responses_subq, responses_subq.c.survey_id == Survey.id)
             .order_by(Survey.created_at.desc(), Survey.id.desc())
             .offset(offset)
             .limit(limit)
@@ -115,16 +134,58 @@ class AdminService:
                 owner_username=username,
                 workspace_id=survey.workspace_id,
                 workspace_name=workspace_name,
+                workspace_description=workspace_description,
                 survey_link=survey.survey_link,
+                status="Active" if survey.survey_link else "Closed",
                 question_count=len(survey.questions or []),
+                responses_count=responses_count,
                 created_at=survey.created_at,
                 updated_at=survey.updated_at,
             )
-            for survey, username, workspace_name in rows
+            for survey, username, workspace_name, workspace_description, responses_count in rows
         ]
         return AdminSurveyListResponse(
             surveys=surveys,
             pagination=AdminSurveyPagination(total=total, limit=limit, offset=offset),
+        )
+
+    async def get_user_survey_summary(
+        self, db: AsyncSession, user_id: int
+    ) -> AdminUserSurveySummaryResponse:
+        """Header summary for the admin 'user detail' page: name/email/status,
+        joined date, and aggregate survey/response counts for one user."""
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+        details = (
+            await db.execute(select(UserDetails).where(UserDetails.user_id == user_id))
+        ).scalar_one_or_none()
+        name = f"{details.first_name} {details.last_name}".strip() if details else (
+            user.display_name or user.username.split("@", 1)[0]
+        )
+        email = details.email if details else user.username
+        user_status = details.profile_status if details else "Active"
+
+        surveys_created = (
+            await db.execute(select(func.count(Survey.id)).where(Survey.user_id == user_id))
+        ).scalar_one()
+        total_responses = (
+            await db.execute(
+                select(func.count(PublicSurveyResponse.id))
+                .join(Survey, Survey.id == PublicSurveyResponse.survey_id)
+                .where(Survey.user_id == user_id)
+            )
+        ).scalar_one()
+
+        return AdminUserSurveySummaryResponse(
+            user_id=user.id,
+            name=name,
+            email=email,
+            status=user_status,
+            joined_on=user.created_at,
+            surveys_created=surveys_created,
+            total_responses=total_responses,
         )
 
     async def get_user_growth(
