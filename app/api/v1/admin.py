@@ -11,6 +11,8 @@ from app.db.database import get_db
 from app.db.models import User
 from app.models.admin_models import (
     AdminSurveyListResponse,
+    AdminSurveyResponseDetailResponse,
+    AdminSurveyResponsesListResponse,
     AdminUserListResponse,
     AdminUserSurveySummaryResponse,
     UserGrowthResponse,
@@ -60,6 +62,37 @@ async def list_surveys(
     Pass `user_id` to view a single user's surveys instead of everyone's.
     """
     return await admin_service.list_surveys(db, limit, offset, search, user_id)
+
+
+@router.get("/surveys/{survey_id}/responses", response_model=AdminSurveyResponsesListResponse)
+@limiter.limit("60/minute")
+async def list_survey_responses(
+    request: Request,
+    survey_id: int,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = Query(None, max_length=255),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminSurveyResponsesListResponse:
+    """List collected responses for any survey, for the administrator dashboard."""
+    return await admin_service.list_survey_responses(db, survey_id, limit, offset, search)
+
+
+@router.get(
+    "/surveys/{survey_id}/responses/{response_id}",
+    response_model=AdminSurveyResponseDetailResponse,
+)
+@limiter.limit("60/minute")
+async def get_survey_response_detail(
+    request: Request,
+    survey_id: int,
+    response_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminSurveyResponseDetailResponse:
+    """Get one collected survey response, including enriched answer preview."""
+    return await admin_service.get_survey_response_detail(db, survey_id, response_id)
 
 
 @router.get("/users/{user_id}/survey-summary", response_model=AdminUserSurveySummaryResponse)

@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -148,6 +149,50 @@ class AdminSurveyResponseDetailResponse(AdminSurveyResponseItem):
     workspace_name: str
     workspace_description: Optional[str] = None
     survey_link: Optional[str] = None
+
+
+class AdminSurveyAnswerPreviewItem(BaseModel):
+    """A submitted answer paired with its survey question text for admin previews."""
+
+    question: str
+    answer: Any
+
+
+class AdminSurveyResponseItem(BaseModel):
+    """Collected survey response row for the administrator survey detail page."""
+
+    id: int
+    response_code: str
+    survey_id: int
+    respondent_email: Optional[str] = None
+    answers: list[dict]
+    answers_preview: list[AdminSurveyAnswerPreviewItem]
+    submitted_at: datetime
+    status: Literal["Completed"] = "Completed"
+    source: Literal["Web"] = "Web"
+
+
+class AdminSurveyResponsePagination(BaseModel):
+    total: int
+    limit: int
+    offset: int
+
+
+class AdminSurveyResponsesListResponse(BaseModel):
+    survey_id: int
+    total_responses: int
+    responses: list[AdminSurveyResponseItem]
+    pagination: AdminSurveyResponsePagination
+
+
+class AdminSurveyResponseDetailResponse(AdminSurveyResponseItem):
+    """Single survey response detail with survey and owner context."""
+
+    user_id: int
+    owner_username: str
+    workspace_id: int
+    workspace_name: str
+    workspace_description: Optional[str] = None
 
 
 class UserGrowthPoint(BaseModel):
