@@ -51,6 +51,21 @@ class AdminSurveyResponse(BaseModel):
     updated_at: datetime
 
 
+class AdminUserSurveySummaryItem(BaseModel):
+    """Survey row included in a user's admin survey summary."""
+
+    id: int
+    workspace_id: int
+    workspace_name: str
+    workspace_description: Optional[str] = None
+    survey_link: str | None = None
+    status: Literal["Active", "Closed"]
+    question_count: int
+    responses_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class AdminUserSurveySummaryResponse(BaseModel):
     """Header summary for the admin "user detail" page (Users > <name>)."""
 
@@ -61,6 +76,7 @@ class AdminUserSurveySummaryResponse(BaseModel):
     joined_on: datetime
     surveys_created: int
     total_responses: int
+    surveys: list[AdminUserSurveySummaryItem]
 
 
 class AdminSurveyPagination(BaseModel):
@@ -103,6 +119,7 @@ class AdminSurveyResponsePagination(BaseModel):
 
 class AdminSurveyResponsesListResponse(BaseModel):
     survey_id: int
+    survey_link: Optional[str] = None
     total_responses: int
     responses: list[AdminSurveyResponseItem]
     pagination: AdminSurveyResponsePagination
@@ -116,6 +133,7 @@ class AdminSurveyResponseDetailResponse(AdminSurveyResponseItem):
     workspace_id: int
     workspace_name: str
     workspace_description: Optional[str] = None
+    survey_link: Optional[str] = None
 
 
 class UserGrowthPoint(BaseModel):

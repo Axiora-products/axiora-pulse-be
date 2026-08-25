@@ -1,6 +1,7 @@
 """Read-only administrator operations."""
 
 import logging
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import String, cast, func, or_, select
@@ -22,6 +23,7 @@ from app.models.admin_models import (
     AdminUserPagination,
     AdminUserResponse,
     AdminUserSurveySummaryResponse,
+    AdminUserSurveySummaryItem,
     UserGrowthPoint,
     UserGrowthResponse,
 )
@@ -133,25 +135,43 @@ class AdminService:
             len(rows), total, limit, offset, bool(search),
         )
         surveys = [
-            AdminSurveyResponse(
-                id=survey.id,
-                user_id=survey.user_id,
+            self._build_admin_survey_response(
+                survey=survey,
                 owner_username=username,
-                workspace_id=survey.workspace_id,
                 workspace_name=workspace_name,
                 workspace_description=workspace_description,
-                survey_link=survey.survey_link,
-                status="Active" if survey.survey_link else "Closed",
-                question_count=len(survey.questions or []),
                 responses_count=responses_count,
-                created_at=survey.created_at,
-                updated_at=survey.updated_at,
             )
             for survey, username, workspace_name, workspace_description, responses_count in rows
         ]
         return AdminSurveyListResponse(
             surveys=surveys,
             pagination=AdminSurveyPagination(total=total, limit=limit, offset=offset),
+        )
+
+    def _build_admin_survey_response(
+        self,
+        *,
+        survey: Survey,
+        owner_username: str,
+        workspace_name: str,
+        workspace_description: str | None,
+        responses_count: int,
+    ) -> AdminSurveyResponse:
+        survey_url = self._survey_url(survey)
+        return AdminSurveyResponse(
+            id=survey.id,
+            user_id=survey.user_id,
+            owner_username=owner_username,
+            workspace_id=survey.workspace_id,
+            workspace_name=workspace_name,
+            workspace_description=workspace_description,
+            survey_link=survey_url,
+            status="Active" if survey_url else "Closed",
+            question_count=len(survey.questions or []),
+            responses_count=responses_count,
+            created_at=survey.created_at,
+            updated_at=survey.updated_at,
         )
 
     async def list_survey_responses(
@@ -193,6 +213,7 @@ class AdminService:
 
         return AdminSurveyResponsesListResponse(
             survey_id=survey.id,
+            survey_link=self._survey_url(survey),
             total_responses=total,
             responses=[self._build_response_item(response, survey) for response in responses],
             pagination=AdminSurveyResponsePagination(total=total, limit=limit, offset=offset),
@@ -229,6 +250,7 @@ class AdminService:
             workspace_id=survey.workspace_id,
             workspace_name=workspace_name,
             workspace_description=workspace_description,
+            survey_link=self._survey_url(survey),
         )
 
     async def get_user_survey_summary(
@@ -259,6 +281,28 @@ class AdminService:
                 .where(Survey.user_id == user_id)
             )
         ).scalar_one()
+        responses_subq = (
+            select(
+                PublicSurveyResponse.survey_id.label("survey_id"),
+                func.count(PublicSurveyResponse.id).label("responses_count"),
+            )
+            .group_by(PublicSurveyResponse.survey_id)
+            .subquery()
+        )
+        survey_rows = (
+            await db.execute(
+                select(
+                    Survey,
+                    Workspace.name,
+                    Workspace.description,
+                    func.coalesce(responses_subq.c.responses_count, 0),
+                )
+                .join(Workspace, Workspace.id == Survey.workspace_id)
+                .outerjoin(responses_subq, responses_subq.c.survey_id == Survey.id)
+                .where(Survey.user_id == user_id)
+                .order_by(Survey.created_at.desc(), Survey.id.desc())
+            )
+        ).all()
 
         return AdminUserSurveySummaryResponse(
             user_id=user.id,
@@ -268,6 +312,15 @@ class AdminService:
             joined_on=user.created_at,
             surveys_created=surveys_created,
             total_responses=total_responses,
+            surveys=[
+                self._build_user_survey_summary_item(
+                    survey=survey,
+                    workspace_name=workspace_name,
+                    workspace_description=workspace_description,
+                    responses_count=responses_count,
+                )
+                for survey, workspace_name, workspace_description, responses_count in survey_rows
+            ],
         )
 
     async def get_user_growth(
@@ -313,6 +366,38 @@ class AdminService:
     @staticmethod
     def _response_code(response_id: int) -> str:
         return f"#RS-{response_id:06d}"
+
+    @staticmethod
+    def _survey_url(survey: Survey) -> str | None:
+        if survey.survey_link:
+            return survey.survey_link
+
+        base_url = os.getenv("PUBLIC_APP_URL")
+        if not base_url or not survey.public_token:
+            return None
+        return f"{base_url.rstrip('/')}/surveys/public/{survey.public_token}"
+
+    def _build_user_survey_summary_item(
+        self,
+        *,
+        survey: Survey,
+        workspace_name: str,
+        workspace_description: str | None,
+        responses_count: int,
+    ) -> AdminUserSurveySummaryItem:
+        survey_url = self._survey_url(survey)
+        return AdminUserSurveySummaryItem(
+            id=survey.id,
+            workspace_id=survey.workspace_id,
+            workspace_name=workspace_name,
+            workspace_description=workspace_description,
+            survey_link=survey_url,
+            status="Active" if survey_url else "Closed",
+            question_count=len(survey.questions or []),
+            responses_count=responses_count,
+            created_at=survey.created_at,
+            updated_at=survey.updated_at,
+        )
 
     def _build_response_item(
         self,
