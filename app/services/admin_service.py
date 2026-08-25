@@ -24,7 +24,6 @@ from app.models.admin_models import (
     AdminUserResponse,
     AdminUserSurveySummaryResponse,
     AdminUserSurveySummaryItem,
-    AdminUserSurveySummaryResponse,
     UserGrowthPoint,
     UserGrowthResponse,
 )
@@ -136,7 +135,6 @@ class AdminService:
             len(rows), total, limit, offset, bool(search),
         )
         surveys = [
-
             self._build_admin_survey_response(
                 survey=survey,
                 owner_username=username,
@@ -323,121 +321,6 @@ class AdminService:
                 )
                 for survey, workspace_name, workspace_description, responses_count in survey_rows
             ],
-
-    async def list_survey_responses(
-        self,
-        db: AsyncSession,
-        survey_id: int,
-        limit: int,
-        offset: int,
-        search: str | None,
-    ) -> AdminSurveyResponsesListResponse:
-        """Return collected responses for any survey, restricted to administrators."""
-        survey = await self._get_survey_or_404(db, survey_id)
-        filters = [PublicSurveyResponse.survey_id == survey.id]
-        if search:
-            term = f"%{search.strip()}%"
-            filters.append(
-                or_(
-                    PublicSurveyResponse.respondent_email.ilike(term),
-                    cast(PublicSurveyResponse.id, String).ilike(term),
-                    cast(PublicSurveyResponse.answers, String).ilike(term),
-                )
-            )
-
-        total_statement = select(func.count(PublicSurveyResponse.id)).where(*filters)
-        responses_statement = (
-            select(PublicSurveyResponse)
-            .where(*filters)
-            .order_by(PublicSurveyResponse.submitted_at.desc(), PublicSurveyResponse.id.desc())
-            .offset(offset)
-            .limit(limit)
-        )
-
-        total = (await db.execute(total_statement)).scalar_one()
-        responses = (await db.execute(responses_statement)).scalars().all()
-        logger.info(
-            "Admin survey responses fetched: survey_id=%s count=%s total=%s",
-            survey.id, len(responses), total,
-        )
-
-        return AdminSurveyResponsesListResponse(
-            survey_id=survey.id,
-            total_responses=total,
-            responses=[self._build_response_item(response, survey) for response in responses],
-            pagination=AdminSurveyResponsePagination(total=total, limit=limit, offset=offset),
-        )
-
-    async def get_survey_response_detail(
-        self,
-        db: AsyncSession,
-        survey_id: int,
-        response_id: int,
-    ) -> AdminSurveyResponseDetailResponse:
-        """Return one collected response for the admin response detail panel."""
-        statement = (
-            select(PublicSurveyResponse, Survey, User.username, Workspace.name, Workspace.description)
-            .join(Survey, Survey.id == PublicSurveyResponse.survey_id)
-            .join(User, User.id == Survey.user_id)
-            .join(Workspace, Workspace.id == Survey.workspace_id)
-            .where(Survey.id == survey_id, PublicSurveyResponse.id == response_id)
-        )
-        row = (await db.execute(statement)).one_or_none()
-        if row is None:
-            await self._get_survey_or_404(db, survey_id)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Survey response not found.",
-            )
-
-        response, survey, owner_username, workspace_name, workspace_description = row
-        item = self._build_response_item(response, survey)
-        return AdminSurveyResponseDetailResponse(
-            **item.model_dump(),
-            user_id=survey.user_id,
-            owner_username=owner_username,
-            workspace_id=survey.workspace_id,
-            workspace_name=workspace_name,
-            workspace_description=workspace_description,
-        )
-
-    async def get_user_survey_summary(
-        self, db: AsyncSession, user_id: int
-    ) -> AdminUserSurveySummaryResponse:
-        """Header summary for the admin 'user detail' page: name/email/status,
-        joined date, and aggregate survey/response counts for one user."""
-        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
-        details = (
-            await db.execute(select(UserDetails).where(UserDetails.user_id == user_id))
-        ).scalar_one_or_none()
-        name = f"{details.first_name} {details.last_name}".strip() if details else (
-            user.display_name or user.username.split("@", 1)[0]
-        )
-        email = details.email if details else user.username
-        user_status = details.profile_status if details else "Active"
-
-        surveys_created = (
-            await db.execute(select(func.count(Survey.id)).where(Survey.user_id == user_id))
-        ).scalar_one()
-        total_responses = (
-            await db.execute(
-                select(func.count(PublicSurveyResponse.id))
-                .join(Survey, Survey.id == PublicSurveyResponse.survey_id)
-                .where(Survey.user_id == user_id)
-            )
-        ).scalar_one()
-
-        return AdminUserSurveySummaryResponse(
-            user_id=user.id,
-            name=name,
-            email=email,
-            status=user_status,
-            joined_on=user.created_at,
-            surveys_created=surveys_created,
-            total_responses=total_responses,
         )
 
     async def get_user_growth(
@@ -515,64 +398,6 @@ class AdminService:
             created_at=survey.created_at,
             updated_at=survey.updated_at,
         )
-
-    def _build_response_item(
-        self,
-        response: PublicSurveyResponse,
-        survey: Survey,
-    ) -> AdminSurveyResponseItem:
-        return AdminSurveyResponseItem(
-            id=response.id,
-            response_code=self._response_code(response.id),
-            survey_id=response.survey_id,
-            respondent_email=response.respondent_email,
-            answers=response.answers or [],
-            answers_preview=self._build_answers_preview(survey.questions or [], response.answers or []),
-            submitted_at=response.submitted_at,
-        )
-
-    @staticmethod
-    def _build_answers_preview(
-        questions: list,
-        answers: list,
-    ) -> list[AdminSurveyAnswerPreviewItem]:
-        question_lookup = {
-            question.get("id"): question.get("question", f"Question {question.get('id')}")
-            for question in questions
-            if isinstance(question, dict)
-        }
-        preview: list[AdminSurveyAnswerPreviewItem] = []
-        for answer in answers:
-            if not isinstance(answer, dict):
-                preview.append(
-                    AdminSurveyAnswerPreviewItem(
-                        question="Unknown question",
-                        answer=answer,
-                    )
-                )
-                continue
-
-            question_id = answer.get("questionId")
-            preview.append(
-                AdminSurveyAnswerPreviewItem(
-                    question=question_lookup.get(question_id, f"Question {question_id}"),
-                    answer=answer.get("answer"),
-                )
-            )
-        return preview
-
-    async def _get_survey_or_404(self, db: AsyncSession, survey_id: int) -> Survey:
-        survey = (await db.execute(select(Survey).where(Survey.id == survey_id))).scalar_one_or_none()
-        if survey is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Survey {survey_id} not found.",
-            )
-        return survey
-
-    @staticmethod
-    def _response_code(response_id: int) -> str:
-        return f"#RS-{response_id:06d}"
 
     def _build_response_item(
         self,
