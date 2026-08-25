@@ -102,6 +102,7 @@ class UserDetails(Base):
     nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
     communication_preferences: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     last_login_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_ist
     )
