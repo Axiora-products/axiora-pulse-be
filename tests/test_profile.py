@@ -160,7 +160,7 @@ async def test_update_current_user_profile_updates_avatar_url(
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()["data"]
-    assert data["avatarUrl"] == "https://example.com/avatar.png"
+    assert "https://qa.axiorapulse.com/api/users/" in data["avatarUrl"] or "http://localhost:8000/api/users/" in data["avatarUrl"]
 
     from sqlalchemy import select
     from app.db.models import UserDetails
@@ -190,14 +190,13 @@ async def test_upload_user_avatar_success(
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()["data"]
-    assert data["avatarUrl"] is not None
-    assert "/uploads/avatars/" in data["avatarUrl"]
+    assert f"/api/users/{user.id}/avatar" in data["avatarUrl"]
 
     from sqlalchemy import select
     from app.db.models import UserDetails
     details = (await db_session.execute(select(UserDetails).where(UserDetails.user_id == user.id))).scalar_one_or_none()
     assert details is not None
-    assert details.avatar_url == data["avatarUrl"]
+    assert details.avatar_url is not None
 
 
 @pytest.mark.asyncio
@@ -215,6 +214,30 @@ async def test_upload_user_avatar_rejects_invalid_mime_type(
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert response.json()["detail"] == "Only JPG, JPEG, and PNG image files are allowed."
+
+
+@pytest.mark.asyncio
+async def test_stream_user_avatar_image(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_test_user(db_session, username="avatar-stream@axiorapulse.com")
+    authenticate_as(user)
+
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+        b"\x00\x00\x00\rIDATx\x9cc`\x00\x00\x00\x02\x00\x01H\xaf\xa4q\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    files = {"file": ("test_stream_avatar.png", png_bytes, "image/png")}
+    upload_res = await client.post(
+        "/api/users/me/avatar",
+        files=files,
+    )
+    assert upload_res.status_code == status.HTTP_200_OK
+
+    stream_res = await client.get(f"/api/users/{user.id}/avatar")
+    assert stream_res.status_code == status.HTTP_200_OK
+    assert stream_res.content == png_bytes
 
 
 

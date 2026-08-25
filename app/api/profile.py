@@ -25,11 +25,15 @@ users_router = APIRouter(prefix="/users", tags=["Profile"])
 
 
 def _to_current_user(user: User, details: UserDetails | None = None) -> CurrentUserResponse:
+    avatar_url = None
+    if details and details.avatar_url:
+        avatar_url = s3_storage_service.get_proxy_avatar_url(user.id, details.avatar_url)
+
     return CurrentUserResponse(
         id=str(user.id),
         email=user.username,
         name=user.display_name or user.username.split("@", 1)[0],
-        avatarUrl=details.avatar_url if details else None,
+        avatarUrl=avatar_url,
         role=user.role,
         createdAt=user.created_at,
         updatedAt=user.updated_at,
@@ -180,6 +184,26 @@ async def upload_user_avatar(
     await db.refresh(details)
 
     return CurrentUserEnvelope(data=_to_current_user(current_user, details))
+
+
+@users_router.get("/{user_id}/avatar", summary="Stream user profile avatar image")
+async def get_user_avatar_by_id(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public proxy endpoint to stream the user's profile avatar image."""
+    details = (
+        await db.execute(select(UserDetails).where(UserDetails.user_id == user_id))
+    ).scalar_one_or_none()
+
+    if not details or not details.avatar_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar not found")
+
+    file_bytes, content_type = s3_storage_service.get_avatar_bytes(details.avatar_url)
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar file not found")
+
+    return Response(content=file_bytes, media_type=content_type)
 
 
 # Extended profile ("user_details") 
