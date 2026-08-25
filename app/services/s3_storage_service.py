@@ -222,6 +222,56 @@ class S3StorageService:
         logger.info("[S3StorageService] Saved workspace asset locally (%s)", local_path)
         return file_url, s3_key
 
+    def upload_avatar(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        user_id: int | str,
+        content_type: str = "image/png",
+    ) -> Tuple[str, str]:
+        """
+        Upload a user profile avatar to the assets bucket under:
+          avatars/{user_id}/{uuid}_{filename}
+
+        Returns Tuple[presigned_file_url, s3_key].
+        Falls back to local storage if AWS credentials are not configured.
+        """
+        unique_id = uuid.uuid4().hex[:8]
+        safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-").strip() or "avatar.png"
+        s3_key = f"avatars/{user_id}/{unique_id}_{safe_filename}"
+
+        if self._s3_client:
+            try:
+                self._s3_client.put_object(
+                    Bucket=self.assets_bucket_name,
+                    Key=s3_key,
+                    Body=file_bytes,
+                    ContentType=content_type,
+                )
+                file_url = self.generate_presigned_url(s3_key)
+                logger.info(
+                    "[S3StorageService] Uploaded user avatar %s → %s",
+                    safe_filename, file_url
+                )
+                return file_url, s3_key
+            except Exception as e:
+                logger.error(
+                    "[S3StorageService] S3 avatar upload failed for %s: %s. Falling back to local.",
+                    safe_filename, e
+                )
+
+        # Local fallback
+        local_dir = os.path.join("uploads", "avatars", str(user_id))
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, f"{unique_id}_{safe_filename}")
+
+        with open(local_path, "wb") as f:
+            f.write(file_bytes)
+
+        file_url = f"/uploads/avatars/{user_id}/{unique_id}_{safe_filename}"
+        logger.info("[S3StorageService] Saved avatar locally (%s)", local_path)
+        return file_url, s3_key
+
     def delete_workspace_asset(self, s3_key: str) -> bool:
         """
         Delete a workspace asset from the axiora-assets bucket by its S3 key.
@@ -233,6 +283,9 @@ class S3StorageService:
             key_parts = s3_key.split("/")
             if key_parts and key_parts[0] == "Assets":
                 key_parts[0] = "assets"
+            # Support avatars delete fallback as well if key starts with avatars
+            if key_parts and key_parts[0] == "avatars":
+                pass
             local_path = os.path.join("uploads", *key_parts)
             try:
                 if os.path.exists(local_path):

@@ -352,7 +352,7 @@ class CurrentUserResponse(BaseModel):
     id: str
     email: str
     name: str
-    avatarUrl: None = None
+    avatarUrl: Optional[str] = None
     role: str
     createdAt: datetime
     updatedAt: datetime
@@ -373,6 +373,7 @@ class CurrentUserResponse(BaseModel):
 class UpdateCurrentUserRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     email: EmailStr
+    avatarUrl: Optional[str] = None
 
 
 class CurrentUserEnvelope(BaseModel):
