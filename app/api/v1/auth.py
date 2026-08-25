@@ -16,6 +16,8 @@ from app.db.database import get_db
 from app.db.models import User
 from app.models.auth_models import (
     AdminLoginResponse,
+    GoogleAuthRequest,
+    GoogleAuthResponse,
     LoginSuccessResponse,
     RegisterResponse,
     ResendOTPRequest,
@@ -173,6 +175,30 @@ async def verify_login(
     db: AsyncSession = Depends(get_db),
 ) -> VerifyLoginResponse:
     return await auth_service.verify_login(payload, db)
+
+
+# ── Google Sign-In ──────────────────────────────────────────────────────────
+
+@router.post(
+    "/google",
+    response_model=GoogleAuthResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Sign in or register with Google",
+    description=(
+        "Accepts a Google Identity Services ID token ('credential'). "
+        "Verifies it against Google's public keys, then logs the user in — "
+        "linking to an existing account by email or provisioning a new one. "
+        "No OTP is required since Google has already verified the email. "
+        "Returns a signed access/refresh token pair plus 'is_new_user'."
+    ),
+)
+@limiter.limit("10/minute")
+async def google_sign_in(
+    request: Request,
+    payload: GoogleAuthRequest,
+    db: AsyncSession = Depends(get_db),
+) -> GoogleAuthResponse:
+    return await auth_service.google_sign_in(payload, db)
 
 
 # ── Admin Login ───────────────────────────────────────────────────────────────
