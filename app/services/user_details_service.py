@@ -53,11 +53,6 @@ class UserDetailsService:
             existing.gender = payload.gender
             existing.nationality = payload.nationality
             existing.communication_preferences = payload.communication_preferences
-<<<<<<< HEAD
-            if payload.avatar_url is not None:
-                existing.avatar_url = payload.avatar_url
-=======
->>>>>>> 3663f3f5b9d50b4c557be992f241fcc4e1f4c969
             existing.updated_at = now_ist()
             await db.flush()
             await db.refresh(existing)
