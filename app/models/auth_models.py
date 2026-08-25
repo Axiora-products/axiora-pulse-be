@@ -149,9 +149,14 @@ class LoginSuccessResponse(BaseModel):
     """Returned on successful login."""
     status: str = "success"
     message: str = "Login successful."
-    jwt: str
+    access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     expires_in_minutes: int
+    role: str = "user"
+    actions: List[str] = Field(default_factory=list)
+    auth_actions: Optional[AuthActionsData] = None    # Post-login gate flags (regular users only)
+
 
 
 class ForgotPasswordRequest(BaseModel):
