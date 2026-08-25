@@ -65,11 +65,12 @@ async def create_survey(
     user_id: int,
     workspace_id: int,
     questions: list[dict] | None = None,
+    survey_link: str | None = "https://example.com/survey",
 ) -> Survey:
     survey = Survey(
         user_id=user_id,
         workspace_id=workspace_id,
-        survey_link="https://example.com/survey",
+        survey_link=survey_link,
         questions=questions if questions is not None else sample_questions(),
     )
     db_session.add(survey)
@@ -213,6 +214,85 @@ async def test_list_users_rejects_invalid_pagination_params(
     assert response_negative_offset.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
+# get /api/v1/admin/users/surveys
+
+@pytest.mark.asyncio
+async def test_list_surveys_includes_survey_link(
+    client: AsyncClient, db_session: AsyncSession
+):
+    admin = await create_test_user(db_session, username="admin-survey-links-admin@axiorapulse.com", role="admin")
+    owner = await create_test_user(db_session, username="admin-survey-links-owner@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=owner.id, name="Survey Link Workspace")
+    survey = await create_survey(
+        db_session,
+        user_id=owner.id,
+        workspace_id=workspace.id,
+        survey_link="https://example.com/s/public-link",
+    )
+    authenticate_as(admin)
+
+    response = await client.get("/api/v1/admin/users/surveys", params={"user_id": owner.id})
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["surveys"][0]["id"] == survey.id
+    assert data["surveys"][0]["survey_link"] == "https://example.com/s/public-link"
+
+
+@pytest.mark.asyncio
+async def test_list_surveys_builds_url_from_public_token_when_link_is_missing(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://app.example.com")
+    admin = await create_test_user(db_session, username="admin-survey-fallback-admin@axiorapulse.com", role="admin")
+    owner = await create_test_user(db_session, username="admin-survey-fallback-owner@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=owner.id, name="Survey Fallback Workspace")
+    survey = await create_survey(
+        db_session,
+        user_id=owner.id,
+        workspace_id=workspace.id,
+        survey_link=None,
+    )
+    authenticate_as(admin)
+
+    response = await client.get("/api/v1/admin/users/surveys", params={"user_id": owner.id})
+
+    assert response.status_code == status.HTTP_200_OK
+    expected_url = f"https://app.example.com/surveys/public/{survey.public_token}"
+    data = response.json()
+    assert data["surveys"][0]["survey_link"] == expected_url
+    assert data["surveys"][0]["status"] == "Active"
+
+
+# get /api/v1/admin/users/{user_id}/survey-summary
+
+@pytest.mark.asyncio
+async def test_user_survey_summary_includes_surveys_with_links(
+    client: AsyncClient, db_session: AsyncSession
+):
+    admin = await create_test_user(db_session, username="admin-summary-links-admin@axiorapulse.com", role="admin")
+    owner = await create_test_user(db_session, username="admin-summary-links-owner@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=owner.id, name="Summary Workspace")
+    survey = await create_survey(
+        db_session,
+        user_id=owner.id,
+        workspace_id=workspace.id,
+        survey_link="https://example.com/s/summary-link",
+    )
+    await create_survey_response(db_session, survey_id=survey.id)
+    authenticate_as(admin)
+
+    response = await client.get(f"/api/v1/admin/users/{owner.id}/survey-summary")
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["surveys_created"] == 1
+    assert data["total_responses"] == 1
+    assert data["surveys"][0]["id"] == survey.id
+    assert data["surveys"][0]["survey_link"] == "https://example.com/s/summary-link"
+    assert data["surveys"][0]["responses_count"] == 1
+
+
 # get /api/v1/admin/surveys/{survey_id}/responses
 
 @pytest.mark.asyncio
@@ -257,6 +337,7 @@ async def test_list_survey_responses_returns_paginated_rows_with_preview(
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["survey_id"] == survey.id
+    assert data["survey_link"] == "https://example.com/survey"
     assert data["total_responses"] == 2
     assert data["pagination"] == {"total": 2, "limit": 1, "offset": 0}
     assert len(data["responses"]) == 1
@@ -342,6 +423,7 @@ async def test_get_survey_response_detail_returns_owner_and_workspace_context(
     assert data["user_id"] == owner.id
     assert data["owner_username"] == owner.username
     assert data["workspace_name"] == "Detail Workspace"
+    assert data["survey_link"] == "https://example.com/survey"
     assert data["answers_preview"] == [
         {"question": "What should improve?", "answer": "Make it faster"}
     ]
