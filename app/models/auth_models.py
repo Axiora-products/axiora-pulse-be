@@ -113,7 +113,7 @@ class AuthActionsData(BaseModel):
     payment              – True  when the user has completed payment (default: True)
     interactive_questions – True  when the user has answered onboarding questions (default: True)
     """
-    payment: bool = True
+    payment: bool = False
     interactive_questions: bool = True
 
 
@@ -149,9 +149,14 @@ class LoginSuccessResponse(BaseModel):
     """Returned on successful login."""
     status: str = "success"
     message: str = "Login successful."
-    jwt: str
+    access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     expires_in_minutes: int
+    role: str = "user"
+    actions: List[str] = Field(default_factory=list)
+    auth_actions: Optional[AuthActionsData] = None    # Post-login gate flags (regular users only)
+
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -378,7 +383,6 @@ class UpdateCurrentUserRequest(BaseModel):
 
 class CurrentUserEnvelope(BaseModel):
     data: CurrentUserResponse
-
 
 
 
