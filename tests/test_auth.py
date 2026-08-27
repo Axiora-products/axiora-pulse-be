@@ -40,12 +40,20 @@ async def create_user(
     username: str = "verified@axiorapulse.com",
     password: str = "Test@12345",
     register_mfa: bool = True,
-    role: str = "user",
+    role: str = "viewer",
 ) -> User:
+    role_name = role if role != "user" else "viewer"
+    role_row = (
+        await db_session.execute(select(Role).where(Role.name == role_name))
+    ).scalar_one_or_none()
+    if role_row is None:
+        role_row = Role(name=role_name, description=role_name)
+        db_session.add(role_row)
+        await db_session.flush()
     user = User(
         username=username,
         password=await hash_password_async(password),
-        role=role,
+        role=role_row,
         register_mfa=register_mfa,
     )
     db_session.add(user)

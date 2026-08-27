@@ -584,6 +584,15 @@ class AuthService:
                 detail="Account not verified. Please complete OTP verification.",
             )
 
+        # Role-based login: the standard /login endpoint is for regular users
+        # (viewer/member only). Admin accounts must use the admin login endpoint.
+        if user.has_role("admin"):
+            logger.warning("Admin user attempted regular login: %s", username)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin accounts must use the admin login endpoint.",
+            )
+
         access_token, refresh_token = await _issue_token_pair(user, db)
 
         from app.services.user_details_service import user_details_service
@@ -600,7 +609,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
             auth_actions=AuthActionsData(
                 payment=await _has_active_payment(user, db),
@@ -679,7 +688,7 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
             auth_actions=AuthActionsData(
                 payment=await _has_active_payment(user, db),
@@ -765,7 +774,7 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=[],
             auth_actions=AuthActionsData(
                 payment=await _has_active_payment(user, db),
@@ -828,7 +837,7 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if user.role != "admin":
+        if not user.has_role("admin"):
             logger.warning("Non-admin user attempted admin login: %s", username)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1033,7 +1042,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
         )
 
