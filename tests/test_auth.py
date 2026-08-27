@@ -214,27 +214,30 @@ async def test_verify_registration_otp_expired_clears_code(
 
 
 @pytest.mark.asyncio
-async def test_user_login_dispatches_mfa_code_and_updates_database(
+async def test_user_login_returns_tokens_directly_without_otp(
     client: AsyncClient,
     db_session: AsyncSession,
 ):
     user = await create_user(db_session, username="login@axiorapulse.com")
 
-    with patch(
-        "app.services.auth_service.dispatch_login_otp",
-        new=AsyncMock(return_value=successful_otp_result()),
-    ) as dispatch_login_otp:
-        response = await client.post(
-            "/api/v1/auth/login",
-            json={"username": user.username, "password": "Test@12345"},
-        )
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "Test@12345"},
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["status"] == "success"
-    await db_session.refresh(user)
-    assert user.login_otp is not None
-    dispatch_login_otp.assert_awaited_once_with(user.username, user.login_otp)
+    assert data["message"] == "Login successful."
+    assert data["access_token"]
+    assert data["refresh_token"]
+    assert data["role"] == "user"
+    # `payment` now reflects real subscription entitlement (SUBSCRIPTION_ENFORCED
+    # defaults on in tests). A freshly created user has no active subscription,
+    # so the payment gate is closed → the frontend routes them to pricing.
+    assert data["auth_actions"]["payment"] is False
+    assert data["auth_actions"]["interactive_questions"] is True
+
 
 
 @pytest.mark.asyncio
@@ -620,20 +623,46 @@ async def test_resend_otp_success_and_failure_paths(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_login_dispatch_failure_returns_bad_gateway(db_session: AsyncSession):
-    user = await create_user(db_session, username="login-dispatch-fail@axiorapulse.com")
+async def test_auth_service_login_returns_tokens_directly(db_session: AsyncSession):
+    user = await create_user(db_session, username="direct-login@axiorapulse.com")
 
-    with patch(
-        "app.services.auth_service.dispatch_login_otp",
-        new=AsyncMock(return_value=OTPResult(success=False, channel="email", error="email failed")),
-    ):
-        with pytest.raises(HTTPException) as exc:
-            await auth_service.login(
-                UserLoginRequest(username=user.username, password="Test@12345"),
-                db_session,
-            )
+    response = await auth_service.login(
+        UserLoginRequest(username=user.username, password="Test@12345"),
+        db_session,
+    )
 
-    assert exc.value.status_code == status.HTTP_502_BAD_GATEWAY
+    assert response.status == "success"
+    assert response.access_token is not None
+    assert response.refresh_token is not None
+    assert response.role == "user"
+    # No subscription → payment gate closed (see entitlement note above).
+    assert response.auth_actions.payment is False
+
+
+@pytest.mark.asyncio
+async def test_login_payment_true_with_active_subscription(db_session: AsyncSession):
+    """An entitled subscription flips the auth-response `payment` flag to True,
+    which routes the user to the dashboard instead of pricing."""
+    from app.db.models import Subscription
+
+    user = await create_user(db_session, username="subscribed@axiorapulse.com")
+    db_session.add(
+        Subscription(
+            user_id=user.id,
+            razorpay_subscription_id="sub_test_entitled",
+            razorpay_plan_id="plan_test",
+            status="active",  # one of billing_service._ENTITLED
+        )
+    )
+    await db_session.flush()
+
+    response = await auth_service.login(
+        UserLoginRequest(username=user.username, password="Test@12345"),
+        db_session,
+    )
+
+    assert response.status == "success"
+    assert response.auth_actions.payment is True
 
 
 @pytest.mark.asyncio

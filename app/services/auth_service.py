@@ -206,6 +206,21 @@ async def _get_or_create_auth_actions(user_id: int, db: AsyncSession) -> AuthAct
     return row
 
 
+async def _has_active_payment(user: User, db: AsyncSession) -> bool:
+    """Live payment-gate state for the auth response's `payment` flag.
+
+    Reads the single billing chokepoint (`has_active_entitlement`), which checks
+    for an entitled Subscription — or returns True for everyone when
+    SUBSCRIPTION_ENFORCED is disabled. This replaces the static, always-True
+    `auth_actions.payment` column so the frontend's `hasActivePlan` reflects the
+    user's real subscription: paid users land on the dashboard, unpaid users are
+    routed to pricing. Imported lazily to avoid an import-time service cycle.
+    """
+    from app.services.billing_service import billing_service
+
+    return await billing_service.has_active_entitlement(user, db)
+
+
 # ── Auth Service ───────────────────────────────────────────────────────────────
 
 class AuthService:
@@ -392,7 +407,7 @@ class AuthService:
                 role=user._primary_role,
                 actions=actions,
                 auth_actions=AuthActionsData(
-                    payment=auth_actions_row.payment,
+                    payment=await _has_active_payment(user, db),
                     interactive_questions=auth_actions_row.interactive_questions,
                 ),
             )
@@ -539,8 +554,8 @@ class AuthService:
 
     async def login(
         self, request: UserLoginRequest, db: AsyncSession
-    ) -> LoginOTPResponse:
-        """Authenticate a user and dispatch a login-specific OTP.
+    ) -> LoginSuccessResponse:
+        """Authenticate a user and issue access/refresh tokens directly.
 
         Raises:
             HTTPException 401 if credentials are invalid.
@@ -564,24 +579,30 @@ class AuthService:
                 detail="Account not verified. Please complete OTP verification.",
             )
 
-        otp = generate_otp()
-        expiry = otp_expiry()
+        access_token, refresh_token = await _issue_token_pair(user, db)
 
-        user.login_otp = otp
-        user.login_otp_expiry = expiry
+        from app.services.user_details_service import user_details_service
+        await user_details_service.touch_last_login(user.id, db)
 
-        logger.info("Login OTP generated for user id=%s (%s)", user.id, user.username)
+        logger.info("Login successful for user id=%s (%s). Tokens issued.", user.id, user.username)
 
-        # Dispatch OTP
-        result = await dispatch_login_otp(username, otp)
-        if not result.success:
-            logger.error("Login OTP dispatch failed for user id=%s: %s", user.id, result.error)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=result.error or "Failed to deliver login verification code.",
-            )
+        auth_actions_row = await _get_or_create_auth_actions(user.id, db)
+        actions = ["dashboard"] if user.role == "admin" else []
+        return LoginSuccessResponse(
+            status="success",
+            message="Login successful.",
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in_minutes=_ACCESS_TOKEN_MINS,
+            role=user.role,
+            actions=actions,
+            auth_actions=AuthActionsData(
+                payment=await _has_active_payment(user, db),
+                interactive_questions=auth_actions_row.interactive_questions,
+            ),
+        )
 
-        return LoginOTPResponse(userid=user.id)
 
     # ── Verify Login ───────────────────────────────────────────────────────────
 
@@ -656,7 +677,7 @@ class AuthService:
             role=user._primary_role,
             actions=actions,
             auth_actions=AuthActionsData(
-                payment=auth_actions_row.payment,
+                payment=await _has_active_payment(user, db),
                 interactive_questions=auth_actions_row.interactive_questions,
             ),
         )
@@ -742,7 +763,7 @@ class AuthService:
             role=user._primary_role,
             actions=[],
             auth_actions=AuthActionsData(
-                payment=auth_actions_row.payment,
+                payment=await _has_active_payment(user, db),
                 interactive_questions=auth_actions_row.interactive_questions,
             ),
             is_new_user=is_new_user,
