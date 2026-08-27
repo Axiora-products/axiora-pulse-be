@@ -198,6 +198,21 @@ async def _get_or_create_auth_actions(user_id: int, db: AsyncSession) -> AuthAct
     return row
 
 
+async def _has_active_payment(user: User, db: AsyncSession) -> bool:
+    """Live payment-gate state for the auth response's `payment` flag.
+
+    Reads the single billing chokepoint (`has_active_entitlement`), which checks
+    for an entitled Subscription — or returns True for everyone when
+    SUBSCRIPTION_ENFORCED is disabled. This replaces the static, always-True
+    `auth_actions.payment` column so the frontend's `hasActivePlan` reflects the
+    user's real subscription: paid users land on the dashboard, unpaid users are
+    routed to pricing. Imported lazily to avoid an import-time service cycle.
+    """
+    from app.services.billing_service import billing_service
+
+    return await billing_service.has_active_entitlement(user, db)
+
+
 # ── Auth Service ───────────────────────────────────────────────────────────────
 
 class AuthService:
@@ -382,7 +397,7 @@ class AuthService:
                 role=user.role,
                 actions=actions,
                 auth_actions=AuthActionsData(
-                    payment=auth_actions_row.payment,
+                    payment=await _has_active_payment(user, db),
                     interactive_questions=auth_actions_row.interactive_questions,
                 ),
             )
@@ -573,7 +588,7 @@ class AuthService:
             role=user.role,
             actions=actions,
             auth_actions=AuthActionsData(
-                payment=auth_actions_row.payment,
+                payment=await _has_active_payment(user, db),
                 interactive_questions=auth_actions_row.interactive_questions,
             ),
         )
@@ -652,7 +667,7 @@ class AuthService:
             role=user.role,
             actions=actions,
             auth_actions=AuthActionsData(
-                payment=auth_actions_row.payment,
+                payment=await _has_active_payment(user, db),
                 interactive_questions=auth_actions_row.interactive_questions,
             ),
         )
@@ -737,7 +752,7 @@ class AuthService:
             role=user.role,
             actions=[],
             auth_actions=AuthActionsData(
-                payment=auth_actions_row.payment,
+                payment=await _has_active_payment(user, db),
                 interactive_questions=auth_actions_row.interactive_questions,
             ),
             is_new_user=is_new_user,
