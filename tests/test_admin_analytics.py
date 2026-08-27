@@ -164,7 +164,7 @@ async def test_dashboard_stats_returns_counts_and_growth(
     p3 = await create_user(db_session, username="ds-p3@axiorapulse.com", created_at=previous)
 
     await create_subscription(db_session, user_id=c1.id, status_name="active", created_at=current)
-    await create_subscription(db_session, user_id=p1.id, status_name="authenticated", created_at=previous)
+    await create_subscription(db_session, user_id=p1.id, status_name="active", created_at=previous)
     await create_subscription(db_session, user_id=p2.id, status_name="cancelled", created_at=previous)
 
     # user workspaces: active current=2, active previous=1, archived previous=1
@@ -181,7 +181,7 @@ async def test_dashboard_stats_returns_counts_and_growth(
     assert data["total_users"] == 5  # admin excluded from customer counts
     assert data["paid_users"] == 2  # c1 + p1
     assert data["non_paid_users"] == 3
-    assert data["active_subscriptions"] == 2  # active + authenticated
+    assert data["active_subscriptions"] == 2  # both active
     assert data["total_workspaces"] == 4
     assert data["active_workspaces"] == 3
     assert data["archived_workspaces"] == 1

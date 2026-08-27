@@ -49,7 +49,8 @@ from app.models.admin_models import (
 logger = logging.getLogger(__name__)
 
 # Subscription statuses that grant paid entitlement (mirrors billing_service).
-_ENTITLED = {"active", "authenticated"}
+# Only a webhook-confirmed 'active' subscription is treated as paid.
+_ENTITLED = {"active"}
 # Payment statuses considered successfully completed for revenue aggregation.
 _SUCCESSFUL_PAYMENTS = {"captured"}
 

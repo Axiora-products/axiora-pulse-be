@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 # Subscription statuses that mean the user still holds (or is completing) a live
 # subscription — used to block creating a duplicate.
 _NON_TERMINAL = {"created", "authenticated", "active", "pending", "halted"}
-# Statuses that grant paid entitlement.
-_ENTITLED = {"active", "authenticated"}
+# Statuses that grant paid entitlement. Only a webhook-confirmed 'active'
+# subscription counts as paid — 'authenticated' means checkout was authorized but
+# the charge hasn't been confirmed, so a mid-payment user is still routed to pay.
+_ENTITLED = {"active"}
 
 # Feature flag — when false, the payment gate is bypassed and every user is treated
 # as entitled. Intended for LOCAL DEVELOPMENT so developers can reach subscription-
