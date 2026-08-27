@@ -17,6 +17,8 @@ class AdminUserResponse(BaseModel):
     role: str
     created_at: datetime
     workspace_count: int
+    active_workspace_count: int
+    archived_workspace_count: int
 
 
 class AdminUserPagination(BaseModel):

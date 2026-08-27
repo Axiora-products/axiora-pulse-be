@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.core.security import hash_password_async, verify_password_async
-from app.db.models import User
+from app.db.models import Role, User
 from app.models.auth_models import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -40,13 +40,19 @@ async def create_user(
     username: str = "verified@axiorapulse.com",
     password: str = "Test@12345",
     register_mfa: bool = True,
-    role: str = "user",
+    role: str = "member",
 ) -> User:
+    role_obj = (await db_session.execute(select(Role).where(Role.name == role))).scalar_one_or_none()
+    if role_obj is None:
+        role_obj = Role(name=role, description=f"{role} role")
+        db_session.add(role_obj)
+        await db_session.flush()
+
     user = User(
         username=username,
         password=await hash_password_async(password),
-        role=role,
         register_mfa=register_mfa,
+        role=role_obj,
     )
     db_session.add(user)
     await db_session.commit()
@@ -429,7 +435,7 @@ async def test_forgot_password_reset_updates_hash_and_revokes_old_access_token(
         {
             "sub": str(user.id),
             "username": user.username,
-            "role": user.role,
+            "role": user._primary_role,
             "iat": datetime.now(tz=timezone.utc) - timedelta(minutes=5),
             "exp": datetime.now(tz=timezone.utc) + timedelta(minutes=30),
         },
@@ -512,18 +518,17 @@ async def test_seed_admin_user_creates_and_updates_default_admin(db_session: Asy
     await seed_admin_user(db_session)
     admin = await get_user_by_username(db_session, "admin@axiorapulse.com")
     assert admin is not None
-    assert admin.role == "admin"
+    assert admin.has_role("admin")
     assert admin.register_mfa is True
     assert await verify_password_async("Test@12345", admin.password)
 
     admin.password = await hash_password_async("OldPass@12345")
-    admin.role = "user"
     admin.register_mfa = False
     await db_session.commit()
 
     await seed_admin_user(db_session)
     await db_session.refresh(admin)
-    assert admin.role == "admin"
+    assert admin.has_role("admin")
     assert admin.register_mfa is True
     assert await verify_password_async("Test@12345", admin.password)
 

@@ -43,7 +43,7 @@ load_dotenv()
 
 _ACCESS_TOKEN_MINS = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
 from app.core.google_auth import GoogleTokenError, verify_google_id_token
-from app.db.models import AuthActions, RefreshSession, User, UserDetails
+from app.db.models import AuthActions, RefreshSession, Role, User, UserDetails
 from app.models.auth_models import (
     AdminLoginResponse,
     AuthActionsData,
@@ -86,18 +86,26 @@ async def seed_admin_user(db: AsyncSession) -> None:
 
     hashed_pw = await hash_password_async("Test@12345")
 
+    # Ensure the 'admin' role exists in the roles table
+    admin_role = (await db.execute(select(Role).where(Role.name == "admin"))).scalar_one_or_none()
+    if admin_role is None:
+        admin_role = Role(name="admin", description="Full platform access; bypasses subscription checks")
+        db.add(admin_role)
+        await db.flush()
+
     if admin_user is None:
         admin_user = User(
-            role="admin",
             username=admin_email,
             password=hashed_pw,
             register_mfa=True,
+            role=admin_role,
         )
         db.add(admin_user)
         await db.commit()
         logger.info("Created default admin user: %s", admin_email)
     else:
-        admin_user.role = "admin"
+        if not admin_user.has_role("admin"):
+            admin_user.role = admin_role
         admin_user.password = hashed_pw
         admin_user.register_mfa = True
         await db.commit()
@@ -173,7 +181,7 @@ def _to_register_response(user: User) -> RegisterResponse:
 async def _issue_token_pair(user: User, db: AsyncSession) -> tuple[str, str]:
     """Create an access token and a rotating, server-revocable refresh session."""
     session_id = str(uuid4())
-    token_data = {"sub": str(user.id), "username": user.username, "role": user.role}
+    token_data = {"sub": str(user.id), "username": user.username, "role": user._primary_role}
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data={**token_data, "sid": session_id})
     db.add(RefreshSession(id=session_id, user_id=user.id, expires_at=datetime.now(tz=timezone.utc) + timedelta(days=7)))
@@ -261,13 +269,15 @@ class AuthService:
         otp = generate_otp()
         expiry = otp_expiry()
 
+        # Default role for new sign-ups is "viewer" (upgraded to "member" on payment)
+        default_role = (await db.execute(select(Role).where(Role.name == "viewer"))).scalar_one_or_none()
         user = User(
-            role="user",
             username=username,
             password=await hash_password_async(request.password),
             register_otp=otp,
             register_otp_expiry=expiry,
             register_mfa=False,
+            role=default_role,
         )
         db.add(user)
         await db.flush()        # Flush to get the auto-generated id
@@ -371,7 +381,7 @@ class AuthService:
             logger.info("Login OTP verified via verify_otp for user id=%s (%s)", user.id, user.username)
 
             auth_actions_row = await _get_or_create_auth_actions(user.id, db)
-            actions = ["dashboard"] if user.role == "admin" else []
+            actions = ["dashboard"] if user.has_role("admin") else []
             return VerifyOTPResponse(
                 status="success",
                 message="Login OTP Validated Successfully !",
@@ -379,7 +389,7 @@ class AuthService:
                 refresh_token=refresh_token,
                 token_type="bearer",
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
-                role=user.role,
+                role=user._primary_role,
                 actions=actions,
                 auth_actions=AuthActionsData(
                     payment=auth_actions_row.payment,
@@ -435,7 +445,7 @@ class AuthService:
             )
 
             auth_actions_row = await _get_or_create_auth_actions(user.id, db)
-            actions = ["dashboard"] if user.role == "admin" else []
+            actions = ["dashboard"] if user.has_role("admin") else []
             return VerifyOTPResponse(
                 status="success",
                 message="OTP Validated Successfully !",
@@ -443,7 +453,7 @@ class AuthService:
                 refresh_token=refresh_token,
                 token_type="bearer",
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
-                role=user.role,
+                role=user._primary_role,
                 actions=actions,
                 auth_actions=RegisterAuthActionsData(
                     interactive_questions=auth_actions_row.interactive_questions,
@@ -643,7 +653,7 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
             auth_actions=AuthActionsData(
                 payment=auth_actions_row.payment,
@@ -700,14 +710,15 @@ class AuthService:
         # 3. Brand-new user — provision a Google-backed account.
         if user is None:
             display_name = (claims.get("name") or "").strip() or None
+            default_role = (await db.execute(select(Role).where(Role.name == "viewer"))).scalar_one_or_none()
             user = User(
-                role="user",
                 username=email,
                 display_name=display_name,
                 password=None,
                 auth_provider="google",
                 google_sub=google_sub,
                 register_mfa=True,
+                role=default_role,
             )
             db.add(user)
             await db.flush()
@@ -728,7 +739,7 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=[],
             auth_actions=AuthActionsData(
                 payment=auth_actions_row.payment,
@@ -791,7 +802,7 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if user.role != "admin":
+        if not user.has_role("admin"):
             logger.warning("Non-admin user attempted admin login: %s", username)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -988,7 +999,7 @@ class AuthService:
             changed_at=user.password_changed_at,
         )
 
-        actions = ["dashboard"] if user.role == "admin" else []
+        actions = ["dashboard"] if user.has_role("admin") else []
         return ForgotPasswordResetResponse(
             status="success",
             message="Password has been reset successfully.",
@@ -996,7 +1007,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
         )
 
