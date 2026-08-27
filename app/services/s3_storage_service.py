@@ -20,8 +20,21 @@ import os
 import uuid
 import logging
 from typing import Tuple
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_s3_object_key(value: str) -> str:
+    """Return the S3 object key from a full signed URL or a bare key.
+
+    Uses URL parsing (not substring matching) so hostnames are validated
+    structurally rather than via naive ``in`` checks.
+    """
+    parts = urlsplit(value)
+    if parts.scheme in ("http", "https") and parts.netloc.endswith("amazonaws.com"):
+        return parts.path.lstrip("/")
+    return value
 
 
 class S3StorageService:
@@ -75,9 +88,7 @@ class S3StorageService:
         if not s3_key:
             return ""
 
-        clean_key = s3_key
-        if "amazonaws.com/" in s3_key:
-            clean_key = s3_key.split("amazonaws.com/")[-1]
+        clean_key = _extract_s3_object_key(s3_key)
 
         target_bucket = bucket_name or self.assets_bucket_name
         if self._s3_client and clean_key and not clean_key.startswith("http"):
@@ -331,10 +342,8 @@ class S3StorageService:
         if not s3_key_or_url:
             return None, "image/png"
 
-        clean_key = s3_key_or_url
-        if "amazonaws.com/" in s3_key_or_url:
-            clean_key = s3_key_or_url.split("amazonaws.com/")[-1]
-        elif clean_key.startswith("/uploads/"):
+        clean_key = _extract_s3_object_key(s3_key_or_url)
+        if clean_key.startswith("/uploads/"):
             clean_key = clean_key[len("/uploads/"):]
         elif clean_key.startswith("uploads/"):
             clean_key = clean_key[len("uploads/"):]

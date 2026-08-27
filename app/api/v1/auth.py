@@ -138,13 +138,13 @@ async def resend_otp(
 
 @router.post(
     "/login",
-    response_model=LoginSuccessResponse,
+    response_model=LoginOTPResponse,
     status_code=status.HTTP_200_OK,
-    summary="Login and obtain access/refresh tokens",
+    summary="Login and request a verification code",
     description=(
         "Authenticates a user with username (email) and password. "
-        "Requires that registration OTP verification has been completed (registerMFA=True). "
-        "Returns signed JWT access and refresh token pair in the response body."
+        "Requires that OTP MFA has been completed (registerMFA=True). "
+        "Generates and dispatches a login-specific OTP to complete authentication."
     ),
 )
 @limiter.limit("5/minute")
@@ -152,9 +152,8 @@ async def login(
     request: Request,
     payload: UserLoginRequest,
     db: AsyncSession = Depends(get_db),
-) -> LoginSuccessResponse:
+) -> LoginOTPResponse:
     return await auth_service.login(payload, db)
-
 
 
 # ── Verify Login ───────────────────────────────────────────────────────────────
