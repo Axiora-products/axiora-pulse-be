@@ -4,12 +4,12 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
-from app.db.models import PublicSurveyResponse, Survey, User, UserDetails, Workspace
+from app.db.models import PublicSurveyResponse, Role, Survey, User, UserDetails, Workspace
 from app.models.admin_models import (
     AdminSurveyAnswerPreviewItem,
     AdminSurveyListResponse,
@@ -39,24 +39,39 @@ class AdminService:
         offset: int,
         search: str | None,
     ) -> AdminUserListResponse:
-        """Return a paginated user directory with each user's workspace count."""
-        filters = []
+        """Return a paginated user directory (excluding admins) with workspace counts."""
+        filters = [User.role_id != 1]  # exclude admin users
         if search:
             term = f"%{search.strip()}%"
             filters.append(or_(User.username.ilike(term), User.display_name.ilike(term)))
 
-        total_statement = select(func.count(User.id))
+        # Subquery: per-user workspace counts split by is_delete
+        ws_counts = (
+            select(
+                Workspace.user_id,
+                func.count(Workspace.id).label("total"),
+                func.count(Workspace.id).filter(Workspace.is_delete == False).label("active"),
+                func.count(Workspace.id).filter(Workspace.is_delete == True).label("archived"),
+            )
+            .group_by(Workspace.user_id)
+            .subquery()
+        )
+
+        total_statement = select(func.count(User.id)).where(*filters)
+
         users_statement = (
-            select(User, func.count(Workspace.id).label("workspace_count"))
-            .outerjoin(Workspace, Workspace.user_id == User.id)
-            .group_by(User.id)
+            select(
+                User,
+                func.coalesce(ws_counts.c.total, 0).label("workspace_count"),
+                func.coalesce(ws_counts.c.active, 0).label("active_workspace_count"),
+                func.coalesce(ws_counts.c.archived, 0).label("archived_workspace_count"),
+            )
+            .outerjoin(ws_counts, ws_counts.c.user_id == User.id)
+            .where(*filters)
             .order_by(User.created_at.desc(), User.id.desc())
             .offset(offset)
             .limit(limit)
         )
-        if filters:
-            total_statement = total_statement.where(*filters)
-            users_statement = users_statement.where(*filters)
 
         total = (await db.execute(total_statement)).scalar_one()
         rows = (await db.execute(users_statement)).all()
@@ -69,11 +84,13 @@ class AdminService:
                 id=user.id,
                 username=user.username,
                 display_name=user.display_name,
-                role=user.role,
+                role=user._primary_role,
                 created_at=user.created_at,
                 workspace_count=workspace_count,
+                active_workspace_count=active_workspace_count,
+                archived_workspace_count=archived_workspace_count,
             )
-            for user, workspace_count in rows
+            for user, workspace_count, active_workspace_count, archived_workspace_count in rows
         ]
         return AdminUserListResponse(
             users=users,
