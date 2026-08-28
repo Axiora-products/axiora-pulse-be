@@ -17,14 +17,20 @@ logger = logging.getLogger(__name__)
 
 class WorkspaceMentorState(BaseModel):
     workspace_id: str
-    state: str = "GATHERING_INFO"  # GATHERING_INFO | READY_TO_VALIDATE | VALIDATING | VALIDATED
+    state: str = "GATHERING_INFO"  # GATHERING_INFO | GATHERING_FINANCIAL_CONTEXT | READY_TO_VALIDATE | VALIDATING | VALIDATED
     idea: Dict[str, Any] = Field(default_factory=lambda: {
         "idea_title": None,
         "idea_description": None,
         "problem_statement": None,
         "industry": "general",
         "founder_validation_goal": "validate my idea",
-        "geography": "global"
+        "geography": "global",
+        "business_stage": None,
+        "current_monthly_revenue": None,
+        "estimated_monthly_costs": None,
+        "budget_range": None,
+        "revenue_model_assumption": None,
+        "pricing_assumption": None,
     })
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
     validation_result: Optional[Dict[str, Any]] = None
@@ -38,7 +44,7 @@ MentorSession = WorkspaceMentorState
 
 EXTRACT_SYSTEM_PROMPT = """
 You are a structured data extractor inside the Axiora Pulse AI Mentor system.
-Your task is to analyze the conversation history between a founder and an AI mentor, and extract/update the founder's startup idea details.
+Your task is to analyze the conversation history between a founder and an AI mentor, and extract/update the founder's startup idea details and financial context.
 
 Return ONLY a raw JSON object containing these keys:
 - idea_title: A short, catchy name/title for the venture (string or null)
@@ -47,11 +53,21 @@ Return ONLY a raw JSON object containing these keys:
 - industry: Sector or industry (string, default "general")
 - geography: Target market region (string, default "global")
 - founder_validation_goal: What the founder wants to learn from validation (string, default "validate my idea")
+- business_stage: Current development stage (e.g. "Idea / Concept", "Pre-MVP", "MVP Live", "Early Revenue", "Scaling", or null)
+- current_monthly_revenue: Current monthly revenue/MRR (e.g. "Pre-Revenue ($0)", "$1,500/mo", "₹50,000/mo", or null)
+- estimated_monthly_costs: Monthly operating expenses/burn (e.g. "Minimal <$500/mo", "$2,000/mo", "₹25,000/mo", or null)
+- budget_range: Total available capital/budget (e.g. "Bootstrapped <$5,000", "$25,000", "₹10 Lakhs", or null)
+- revenue_model_assumption: Planned monetization (e.g. "Subscription / SaaS", "Freemium", "Commission", or null)
+- pricing_assumption: Target price point/subscription tier (e.g. "$9.99/mo", "$49/mo", "₹999/mo", or null)
 
 Guidelines:
-1. Do NOT guess or invent details. Only extract what the user has explicitly stated.
+1. SUPPORT BOTH PREDEFINED OPTIONS & CUSTOM MESSAGES:
+   - The user may select an option number/label (e.g. "[1] Pre-Revenue", "Option 2", "freemium").
+   - The user may also reply in free-form custom conversational text, custom numbers, or localized currencies (e.g. "we have around 10 lakhs in bank", "spending 30k INR on aws and tools", "aiming for ₹1499 per year per user", "we are pre-revenue students").
+   - Extract and normalize BOTH predefined selections and custom natural language inputs into concise, meaningful values.
 2. If a field was extracted previously and the user hasn't modified it, keep it.
-3. Return raw JSON ONLY. No markdown formatting like ```json ... ```. No extra text.
+3. Only extract what the user has stated; do not invent or hallucinate metrics.
+4. Return raw JSON ONLY. No markdown formatting like ```json ... ```. No extra text.
 """
 
 # ── Dynamic workspace state block (appended to skill knowledge base) ─────────────
@@ -69,18 +85,61 @@ Missing required fields to run validation: {missing_fields}
 
 State-Specific Instructions:
 1. If state is GATHERING_INFO:
-   - Ask clarifying, targeted questions to help the founder fill in the missing fields: {missing_fields}.
+   - Ask clarifying, targeted questions to help the founder fill in the core missing idea fields: {missing_fields}.
    - Ask only ONE or TWO clear questions at a time. Keep it conversational.
    - If they gave you a vague description, help them expand it.
+   - Support both custom conversational responses and structured answers.
    - Provide a useful insight after every two or three questions.
    - Follow the progressive disclosure rules from your knowledge base.
-2. If state is READY_TO_VALIDATE:
-   - Summarize the idea you've understood based on the extracted fields.
-   - Explain that you are ready to trigger the AI Orchestration validation analysis.
-   - Tell them they can click the "Run Validation" button on the dashboard or tell you "Run validation analysis".
-3. If state is VALIDATING:
+2. If state is GATHERING_FINANCIAL_CONTEXT:
+   - Acknowledge and validate the core idea gathered so far.
+   - Explain politely that to run an accurate AI CFO and Financial Readiness analysis (real unit economics, runway scenarios, and break-even timelines), you need a few quick baseline financial details.
+   - Ask for the missing financial fields: {missing_fields}.
+   - CRITICAL REQUIREMENT FOR FINANCIAL QUESTIONS:
+     Whenever you ask for any financial category, you MUST ALWAYS provide clear, predefined selectable prompt options and structured suggestions so the founder can choose an option OR write their own custom answer. Format them neatly:
+     * For **Business Stage**:
+       - [1] Idea / Concept Stage (Refining core value prop)
+       - [2] Pre-MVP / Prototype (Designing or developing MVP)
+       - [3] MVP Live / Beta Testing (Testing with early users/waitlist)
+       - [4] Early Revenue (Initial paying customers acquired)
+       - [5] Growth / Scaling (Validated PMF, scaling revenue)
+     * For **Current Monthly Revenue**:
+       - [1] Pre-Revenue ($0 / ₹0 — building before launch)
+       - [2] Early Revenue (< $1,000 / < ₹1,00,000 per month)
+       - [3] Growing MRR ($1,000 - $10,000 / ₹1L - ₹10L per month)
+       - [4] Established MRR ($10,000+ / ₹10L+ per month)
+     * For **Estimated Monthly Costs / Burn**:
+       - [1] Minimal / Bootstrapped (< $500 / < ₹50,000 per month)
+       - [2] Lean Operating ($500 - $2,500 / ₹50K - ₹2L per month)
+       - [3] Moderate Burn ($2,500 - $10,000 / ₹2L - ₹8L per month)
+       - [4] Scaling Burn ($10,000+ / ₹8L+ per month)
+     * For **Available Capital / Budget**:
+       - [1] Bootstrapped / Savings (< $5,000 / < ₹5 Lakhs)
+       - [2] Seed / Angel Capital ($5,000 - $25,000 / ₹5L - ₹20 Lakhs)
+       - [3] Funded / Strong Reserves ($25,000+ / ₹20 Lakhs+)
+     * For **Revenue Model**:
+       - [1] Recurring Subscription (SaaS monthly/annual)
+       - [2] Freemium (Free basic tier + Paid upgrade)
+       - [3] Transaction Fee / Commission (% per sale)
+       - [4] Usage-based / Pay-as-you-go
+     * For **Target Pricing**:
+       - [1] Entry Tier ($9 - $29/mo or ₹499 - ₹1,999/mo)
+       - [2] Pro Tier ($49 - $149/mo or ₹2,499 - ₹7,999/mo)
+       - [3] Enterprise ($250+/mo or ₹15,000+/mo)
+   - SUPPORT CUSTOM MESSAGES & REPLIES:
+     Explicitly let the founder know they can select an option number (e.g. '1', 'Option 2') OR simply describe their situation in their own custom words and figures (e.g. 'I have ₹15,000 saved up and want to charge ₹499/mo').
+   - When the user sends a custom reply with their own figures or words, warmly acknowledge it, confirm understanding, and extract it seamlessly.
+   - Ask at most 2 financial categories at a time so the founder isn't overwhelmed.
+3. If state is READY_TO_VALIDATE:
+   - Summarize the complete idea and financial parameters understood:
+     * Idea & Problem
+     * Business Stage, Revenue & Monthly Burn
+     * Budget, Revenue Model & Target Pricing
+   - Explain that all 4 specialist AI agents (Problem Validation, Market Research, Survey Intelligence, and Financial AI CFO) are ready to analyze the venture.
+   - Tell them they can click the "Run Validation" button on the dashboard or reply "Run validation analysis".
+4. If state is VALIDATING:
    - Let the user know the validation engine is processing their idea.
-4. If state is VALIDATED:
+5. If state is VALIDATED:
    - Comment on the validation run result.
    - Summarize the final score ({validation_score}/100) and the verdict ({validation_verdict}).
    - Highlight the main strengths and the critical risks.
@@ -199,7 +258,7 @@ class MentorService:
 
         if is_trigger_command and state.state == "READY_TO_VALIDATE":
             state.state = "VALIDATING"
-            logger.info(f"[MentorService] State GATHERING_INFO -> VALIDATING for workspace {state.workspace_id}")
+            logger.info(f"[MentorService] State READY_TO_VALIDATE -> VALIDATING for workspace {state.workspace_id}")
             
             try:
                 # Prepare and trigger orchestration
@@ -207,6 +266,14 @@ class MentorService:
                     idea_title=state.idea.get("idea_title") or "Unnamed Venture",
                     idea_description=state.idea.get("idea_description") or "No description provided.",
                     problem_statement=state.idea.get("problem_statement") or "No problem statement.",
+                    additional_context={
+                        "business_stage": state.idea.get("business_stage"),
+                        "current_monthly_revenue": state.idea.get("current_monthly_revenue"),
+                        "estimated_monthly_costs": state.idea.get("estimated_monthly_costs"),
+                        "budget_range": state.idea.get("budget_range"),
+                        "revenue_model_assumption": state.idea.get("revenue_model_assumption"),
+                        "pricing_assumption": state.idea.get("pricing_assumption"),
+                    }
                 )
 
                 request = OrchestrationRequest(
@@ -238,8 +305,8 @@ class MentorService:
                 })
                 return state
 
-        # If we are gathering info, run the Information Extractor first
-        if state.state == "GATHERING_INFO":
+        # If we are gathering info or financial context, run the Information Extractor
+        if state.state in ("GATHERING_INFO", "GATHERING_FINANCIAL_CONTEXT"):
             await self._run_extraction(state, user_id=user_id, db=db)
 
         # Generate conversational response
@@ -252,9 +319,9 @@ class MentorService:
         user_id: Optional[int] = None,
         db: Optional[Any] = None,
     ) -> None:
-        """Helper to scan conversation history and extract idea details."""
+        """Helper to scan conversation history and extract idea & financial details."""
         history_str = ""
-        for msg in state.conversation_history[-6:]:  # focus on recent history for context
+        for msg in state.conversation_history[-8:]:  # focus on recent history for context
             history_str += f"{msg['role'].capitalize()}: {msg['content']}\n"
 
         prompt = f"Existing Idea Context:\n{json.dumps(state.idea, indent=2)}\n\nConversation History:\n{history_str}\n"
@@ -301,11 +368,33 @@ class MentorService:
                 )
 
                 # Programmatic check of required fields
-                required = ["idea_title", "idea_description", "problem_statement"]
-                missing = [f for f in required if not state.idea.get(f)]
-                if not missing:
+                core_required = ["idea_title", "idea_description", "problem_statement"]
+                missing_core = [f for f in core_required if not state.idea.get(f)]
+
+                financial_required = [
+                    "business_stage",
+                    "current_monthly_revenue",
+                    "estimated_monthly_costs",
+                    "budget_range",
+                    "revenue_model_assumption",
+                    "pricing_assumption",
+                ]
+                missing_financial = [f for f in financial_required if not state.idea.get(f)]
+
+                if missing_core:
+                    state.state = "GATHERING_INFO"
+                elif missing_financial:
+                    state.state = "GATHERING_FINANCIAL_CONTEXT"
+                    logger.info(
+                        "[MentorService] Core fields satisfied for '%s'. State -> GATHERING_FINANCIAL_CONTEXT (missing: %s)",
+                        state.workspace_id, missing_financial,
+                    )
+                else:
                     state.state = "READY_TO_VALIDATE"
-                    logger.info(f"[MentorService] All required fields satisfied for workspace '{state.workspace_id}'! State -> READY_TO_VALIDATE")
+                    logger.info(
+                        "[MentorService] All core & financial fields satisfied for workspace '%s'! State -> READY_TO_VALIDATE",
+                        state.workspace_id,
+                    )
 
         except Exception as e:
             logger.warning(f"[MentorService] Extraction step failed: {e}. Continuing conversation without it.")
@@ -318,9 +407,23 @@ class MentorService:
         db: Optional[Any] = None,
     ) -> None:
         """Call LLM with current workspace state to write assistant response."""
-        # Find missing required fields
-        required = ["idea_title", "idea_description", "problem_statement"]
-        missing = [f.replace("_", " ").title() for f in required if not state.idea.get(f)]
+        # Find missing required fields according to current state
+        core_required = ["idea_title", "idea_description", "problem_statement"]
+        financial_required = [
+            "business_stage",
+            "current_monthly_revenue",
+            "estimated_monthly_costs",
+            "budget_range",
+            "revenue_model_assumption",
+            "pricing_assumption",
+        ]
+
+        if state.state == "GATHERING_INFO":
+            missing = [f.replace("_", " ").title() for f in core_required if not state.idea.get(f)]
+        elif state.state == "GATHERING_FINANCIAL_CONTEXT":
+            missing = [f.replace("_", " ").title() for f in financial_required if not state.idea.get(f)]
+        else:
+            missing = []
 
         # Get validation context if we just validated
         score = 0.0

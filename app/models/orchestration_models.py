@@ -29,6 +29,7 @@ class IdeaInput(BaseModel):
     idea_description: str = Field(..., min_length=10, description="Full description of the idea")
     problem_statement: str = Field(..., min_length=10, description="The core problem being solved")
     founder_evidence: Optional[str] = Field(default=None, description="Stated evidence, prior experience, or existing data")
+    additional_context: dict[str, Any] = Field(default_factory=dict, description="Additional context such as gathered financial baseline metrics")
 
 
 class OrchestrationRequest(BaseModel):

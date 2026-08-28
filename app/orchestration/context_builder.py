@@ -86,6 +86,10 @@ Please infer and provide realistic, specific and professional values for:
         raw_bt = inferred.get("business_type", "Unclear") or "Unclear"
         business_type = raw_bt if raw_bt in ("B2B", "B2C", "B2B2C") else "Unclear"
 
+        additional_ctx = {}
+        if getattr(idea, "additional_context", None) and isinstance(idea.additional_context, dict):
+            additional_ctx.update(idea.additional_context)
+
         return AgentInput(
             idea_title=idea.idea_title,
             idea_description=idea.idea_description,
@@ -95,7 +99,7 @@ Please infer and provide realistic, specific and professional values for:
             founder_validation_goal=founder_validation_goal.strip(),
             geography=geography.strip(),
             founder_evidence=idea.founder_evidence,
-            # TODO Phase 2: additional_context = await db.fetch_workspace_context(workspace_id)
+            additional_context=additional_ctx,
         )
 
 
