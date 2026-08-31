@@ -38,12 +38,15 @@ from app.db.models import Workspace
 from app.agents.idea_validation_agent import IdeaValidationAgent
 from app.agents.market_research_agent import MarketResearchAgent
 from app.agents.survey_intelligence_agent import SurveyIntelligenceAgent
+from app.agents.financial_readiness_agent import FinancialReadinessAgent
 
 AGENT_REGISTRY: dict[str, type] = {
     "idea_validation_agent": IdeaValidationAgent,
     "market_research_agent": MarketResearchAgent,
     "survey_intelligence_agent": SurveyIntelligenceAgent,
+    "financial_readiness_agent": FinancialReadinessAgent,
 }
+
 
 logger = logging.getLogger(__name__)
 
