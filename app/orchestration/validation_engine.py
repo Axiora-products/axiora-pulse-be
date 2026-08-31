@@ -35,14 +35,13 @@ logger = logging.getLogger(__name__)
 
 # ── Scoring weights ────────────────────────────────────────────────────────────
 AGENT_WEIGHTS: dict[str, float] = {
-    "idea_validation_agent": 0.25,
-    "market_research_agent": 0.25,
-    "survey_intelligence_agent": 0.25,
-    "financial_readiness_agent": 0.25,
-    # Phase 2+ future addition:
+    "idea_validation_agent": 0.35,
+    "market_research_agent": 0.35,
+    "survey_intelligence_agent": 0.30,
+    # Phase 2+ addition:
     # "gtm_strategy_agent": 0.15,
+    # "financial_readiness_agent": 0.20,
 }
-
 
 # ── Verdict thresholds ─────────────────────────────────────────────────────────
 _VERDICT_TABLE = [
@@ -213,19 +212,6 @@ class ValidationEngine:
             if q_count > 0:
                 strengths.append(f"Hypothesis Questionnaire: {q_count} targeted questions generated.")
 
-        # 4. financial_readiness_agent
-        fin_data: dict = agent_results.get("financial_readiness_agent", {}).get("data", {})
-        if fin_data:
-            decision = fin_data.get("ai_cfo_decision", "")
-            if decision:
-                strengths.append(f"AI CFO Decision: {decision.replace('_', ' ').title()}")
-            for rev_model in fin_data.get("revenue_model_options", []):
-                strengths.append(f"Monetization Strategy: {rev_model}")
-            for rflag in fin_data.get("financial_risk_flags", []):
-                risks.append(str(rflag))
-            for action in fin_data.get("priority_actions", []):
-                recommendations.append(str(action))
-
         # Verdict-based next steps
         if verdict == ValidationVerdict.BUILD:
             recommendations.append("Deploy validation survey to 20-30 target respondents.")
@@ -239,7 +225,6 @@ class ValidationEngine:
             recommendations.append("Gather further detail on problem severity and target buyer profile.")
 
         return strengths, risks, assumptions, recommendations
-
 
     # ── Mentor summary builder ─────────────────────────────────────────────────
 

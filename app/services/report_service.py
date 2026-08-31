@@ -208,10 +208,6 @@ class ReportService:
         if agent_key in ("survey_intelligence_agent", "full", "all"):
             blocks.extend(self._survey_blocks(agent_results))
 
-        if agent_key in ("financial_readiness_agent", "full", "all"):
-            blocks.extend(self._financial_readiness_blocks(agent_results))
-
-
         if not blocks:
             blocks.append(
                 {
@@ -326,51 +322,6 @@ class ReportService:
             *self._list_blocks("Hypothesis Questionnaire", question_lines),
         ]
         return [block for block in blocks if block]
-
-    def _financial_readiness_blocks(self, agent_results: Dict[str, Any]) -> list[dict[str, Any]]:
-        fin = (agent_results.get("financial_readiness_agent") or {}).get("data") or {}
-        score = fin.get("financial_readiness_score", "N/A")
-        decision = str(fin.get("ai_cfo_decision", "N/A")).replace("_", " ").upper()
-        confidence = self._percent(fin.get("confidence", 0.5))
-
-        unit_econ = fin.get("unit_economics_summary") or {}
-        burn_runway = fin.get("burn_and_runway_analysis") or {}
-
-        unit_econ_lines = []
-        if isinstance(unit_econ, dict):
-            for k, v in unit_econ.items():
-                label = k.replace("_", " ").title()
-                unit_econ_lines.append(f"{label}: {v}")
-
-        burn_lines = []
-        if isinstance(burn_runway, dict):
-            for k, v in burn_runway.items():
-                label = k.replace("_", " ").title()
-                burn_lines.append(f"{label}: {v}")
-
-        blocks: list[dict[str, Any]] = [
-            {
-                "type": "section",
-                "title": "Financial Readiness & AI CFO Analysis",
-                "metrics": [
-                    ("Readiness Score", f"{score}/100"),
-                    ("CFO Decision", decision),
-                    ("Confidence", f"{confidence}%"),
-                ],
-                "min_height": 96,
-            },
-            self._paragraph_block("AI CFO Executive Summary:", fin.get("executive_summary")),
-            self._paragraph_block("Capital & Funding Strategy:", fin.get("funding_gap_awareness")),
-            *self._list_blocks("Cost Structure Summary", fin.get("cost_category_summary")),
-            *self._list_blocks("Revenue Model Options", fin.get("revenue_model_options")),
-            *self._list_blocks("Pricing Considerations", fin.get("pricing_consideration_notes")),
-            *self._list_blocks("Unit Economics Estimates", unit_econ_lines),
-            *self._list_blocks("Burn Rate & Runway Dynamics", burn_lines),
-            *self._list_blocks("Financial Risk Flags", fin.get("financial_risk_flags")),
-            *self._list_blocks("Priority Financial Actions", fin.get("priority_actions")),
-        ]
-        return [block for block in blocks if block]
-
 
     def _paragraph_block(self, title: str, body: Any) -> Optional[dict[str, Any]]:
         if not body:
@@ -536,11 +487,9 @@ class ReportService:
             "idea_validation_agent": "Idea Validation Report",
             "market_research_agent": "Market Research Report",
             "survey_intelligence_agent": "Survey Intelligence Report",
-            "financial_readiness_agent": "Financial Readiness Report",
             "full": "Startup Validation Report",
             "all": "Startup Validation Report",
         }.get(agent_key, "Startup Validation Report")
-
 
     def _as_list(self, value: Any) -> Iterable[Any]:
         if not value:
