@@ -369,6 +369,43 @@ class S3StorageService:
 
         return None, content_type
 
+    def get_file_bytes(self, s3_key_or_url: str, bucket_name: str | None = None) -> bytes | None:
+        """
+        Retrieves raw file bytes from S3 or local disk for a given s3_key or /uploads/ path.
+        """
+        if not s3_key_or_url:
+            return None
+
+        clean_key = _extract_s3_object_key(s3_key_or_url)
+        if clean_key.startswith("/uploads/"):
+            clean_key = clean_key[len("/uploads/"):]
+        elif clean_key.startswith("uploads/"):
+            clean_key = clean_key[len("uploads/"):]
+
+        target_bucket = bucket_name or self.assets_bucket_name
+        if self._s3_client and not clean_key.startswith("http"):
+            try:
+                res = self._s3_client.get_object(Bucket=target_bucket, Key=clean_key)
+                return res["Body"].read()
+            except Exception as e:
+                logger.error("[S3StorageService] Failed to fetch file from S3 (%s): %s", clean_key, e)
+
+        # Local fallback read
+        local_path = os.path.join("uploads", *clean_key.split("/"))
+        if os.path.exists(local_path):
+            with open(local_path, "rb") as f:
+                return f.read()
+
+        key_parts = clean_key.split("/")
+        if key_parts and key_parts[0] == "Assets":
+            key_parts[0] = "assets"
+        local_path_assets = os.path.join("uploads", *key_parts)
+        if os.path.exists(local_path_assets):
+            with open(local_path_assets, "rb") as f:
+                return f.read()
+
+        return None
+
     def delete_workspace_asset(self, s3_key: str) -> bool:
         """
         Delete a workspace asset from the axiora-assets bucket by its S3 key.
