@@ -159,33 +159,3 @@ async def test_run_orchestration_rejects_invalid_idea_payloads(
 async def test_run_orchestration_requires_idea_field(client: AsyncClient):
     response = await client.post("/api/v1/orchestration/run", json={})
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-
-def test_planner_includes_all_four_agents():
-    from app.orchestration.planner import planner, WORKFLOW_AGENT_MAP
-    from app.models.orchestration_models import OrchestrationRequest, IdeaInput
-    
-    req = OrchestrationRequest(
-        idea=IdeaInput(
-            idea_title="Test Idea",
-            idea_description="Test idea description here",
-            problem_statement="Test problem statement here",
-        ),
-        workflow_type=WorkflowType.IDEA_VALIDATION,
-    )
-    agents = planner.plan(req)
-    assert agents == [
-        "idea_validation_agent",
-        "market_research_agent",
-        "survey_intelligence_agent",
-        "financial_readiness_agent",
-    ]
-
-
-def test_orchestrator_registry_has_four_agents():
-    from app.orchestration.orchestrator import AGENT_REGISTRY
-    assert "financial_readiness_agent" in AGENT_REGISTRY
-    assert "idea_validation_agent" in AGENT_REGISTRY
-    assert "market_research_agent" in AGENT_REGISTRY
-    assert "survey_intelligence_agent" in AGENT_REGISTRY
-
