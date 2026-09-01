@@ -80,16 +80,35 @@ Please infer and provide realistic, specific and professional values for:
         except Exception as e:
             logger.warning(f"[ContextBuilder] Field inference failed: {e}. Using fallback defaults.")
 
-        industry = inferred.get("industry") or "general"
-        founder_validation_goal = inferred.get("founder_validation_goal") or "validate my idea"
-        geography = inferred.get("geography") or "global"
-        raw_bt = inferred.get("business_type", "Unclear") or "Unclear"
+        # Prioritize explicitly provided idea fields, falling back to LLM inference or default
+        industry = (
+            idea.industry
+            if idea.industry and idea.industry != "general"
+            else (inferred.get("industry") or "general")
+        )
+        founder_validation_goal = (
+            idea.founder_validation_goal
+            if idea.founder_validation_goal and idea.founder_validation_goal != "validate my idea"
+            else (inferred.get("founder_validation_goal") or "validate my idea")
+        )
+        geography = (
+            idea.geography
+            if idea.geography and idea.geography != "global"
+            else (inferred.get("geography") or "global")
+        )
+        target_customer = idea.target_customer or inferred.get("target_customer")
+        raw_bt = (
+            idea.business_type
+            if idea.business_type and idea.business_type != "Unclear"
+            else (inferred.get("business_type") or "Unclear")
+        )
         business_type = raw_bt if raw_bt in ("B2B", "B2C", "B2B2C") else "Unclear"
 
         return AgentInput(
             idea_title=idea.idea_title,
             idea_description=idea.idea_description,
             problem_statement=idea.problem_statement,
+            target_customer=target_customer,
             industry=industry.strip(),
             business_type=business_type,
             founder_validation_goal=founder_validation_goal.strip(),
