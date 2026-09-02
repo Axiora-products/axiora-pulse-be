@@ -208,6 +208,9 @@ class ReportService:
         if agent_key in ("survey_intelligence_agent", "full", "all"):
             blocks.extend(self._survey_blocks(agent_results))
 
+        if agent_key in ("financial_readiness_agent", "full", "all"):
+            blocks.extend(self._financial_readiness_blocks(agent_results))
+
         if not blocks:
             blocks.append(
                 {
@@ -223,9 +226,21 @@ class ReportService:
         self, validation_result: Dict[str, Any], agent_results: Dict[str, Any]
     ) -> list[dict[str, Any]]:
         iv = (agent_results.get("idea_validation_agent") or {}).get("data") or {}
-        score = validation_result.get("validation_score", iv.get("problem_clarity_score", "N/A"))
-        verdict = str(validation_result.get("verdict", "N/A")).replace("_", " ").upper()
-        confidence = self._percent(validation_result.get("confidence_rating", iv.get("confidence", 0.5)))
+        score = validation_result.get("validation_score", iv.get("validation_score", iv.get("problem_clarity_score", "N/A")))
+        verdict = str(iv.get("verdict") or validation_result.get("verdict", "N/A")).replace("_", " ").upper()
+        confidence = self._percent(iv.get("confidence") or validation_result.get("confidence_rating", 0.5))
+
+        sections = iv.get("sections") if isinstance(iv.get("sections"), dict) else {}
+        prob_id = sections.get("problem_identification") or {}
+        idea_clarity = sections.get("idea_clarity") or {}
+        cust_prob = sections.get("customer_problem") or {}
+        target_aud = sections.get("target_audience_hypothesis") or {}
+        sol_def = sections.get("solution_definition") or {}
+        val_prop = sections.get("value_proposition") or {}
+        feas = sections.get("idea_feasibility") or {}
+        comp = sections.get("initial_competitor_check") or {}
+        val_surv = sections.get("validation_survey_interviews") or {}
+        decision = sections.get("decision") or {}
 
         blocks: list[dict[str, Any]] = [
             {
@@ -240,37 +255,272 @@ class ReportService:
             }
         ]
 
-        if iv.get("problem_statement_summary"):
-            blocks.append(
-                {
-                    "type": "paragraph",
-                    "title": "Problem Summary:",
-                    "body": iv["problem_statement_summary"],
-                    "min_height": 88,
-                }
-            )
-
-        if iv.get("falsifiable_problem_sentence"):
+        # ── 1. Problem Identification ──────────────────────────────────────────
+        falsifiable_stmt = (
+            prob_id.get("falsifiable_problem_sentence")
+            or iv.get("falsifiable_problem_sentence")
+            or iv.get("problem_statement")
+        )
+        if falsifiable_stmt:
             blocks.append(
                 {
                     "type": "inline",
                     "label": "Falsifiable Problem Statement",
-                    "body": iv["falsifiable_problem_sentence"],
+                    "body": falsifiable_stmt,
                     "accent": True,
                     "min_height": 52,
                 }
             )
 
+        problem_summary = (
+            prob_id.get("impact_scope")
+            or iv.get("problem_statement_summary")
+        )
+        if problem_summary and problem_summary != falsifiable_stmt:
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Problem Scope & Impact:",
+                    "body": problem_summary,
+                    "min_height": 80,
+                }
+            )
+
+        if prob_id.get("root_cause"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Root Cause Analysis:",
+                    "body": prob_id["root_cause"],
+                    "min_height": 72,
+                }
+            )
+
+        # ── 2. Idea Clarity ───────────────────────────────────────────────────
+        if idea_clarity.get("assessment"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Concept Clarity Assessment:",
+                    "body": idea_clarity["assessment"],
+                    "min_height": 72,
+                }
+            )
+
+        # ── 3. Customer Problem Profile ───────────────────────────────────────
+        pain_profile_parts = []
+        if cust_prob.get("pain_type"):
+            pain_profile_parts.append(f"Pain Type: {cust_prob['pain_type']}")
+        if cust_prob.get("severity"):
+            pain_profile_parts.append(f"Severity: {cust_prob['severity']}")
+        if cust_prob.get("frequency"):
+            pain_profile_parts.append(f"Frequency: {cust_prob['frequency']}")
+
+        if pain_profile_parts:
+            blocks.append(
+                {
+                    "type": "inline",
+                    "label": "Pain Characteristics",
+                    "body": " | ".join(pain_profile_parts),
+                    "accent": False,
+                    "min_height": 46,
+                }
+            )
+
+        if cust_prob.get("cost_of_inaction"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Cost of Inaction:",
+                    "body": cust_prob["cost_of_inaction"],
+                    "min_height": 72,
+                }
+            )
+
+        workarounds = (
+            cust_prob.get("current_workarounds")
+            or iv.get("current_workarounds")
+        )
+        if workarounds:
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Current Workarounds & Substitutes:",
+                    "body": workarounds,
+                    "min_height": 72,
+                }
+            )
+
+        # ── 4. Target Audience Hypothesis ──────────────────────────────────────
+        icp = (
+            target_aud.get("icp")
+            or iv.get("who_and_frequency")
+        )
+        if icp:
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Target Beachhead ICP:",
+                    "body": icp,
+                    "min_height": 72,
+                }
+            )
+
+        if target_aud.get("user_persona"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Primary User Persona:",
+                    "body": target_aud["user_persona"],
+                    "min_height": 64,
+                }
+            )
+
+        if target_aud.get("buyer_persona"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Economic Buyer Persona:",
+                    "body": target_aud["buyer_persona"],
+                    "min_height": 64,
+                }
+            )
+
+        if target_aud.get("early_adopter_profile"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Early Adopter Profile:",
+                    "body": target_aud["early_adopter_profile"],
+                    "min_height": 64,
+                }
+            )
+
+        # ── 5. Solution Definition ────────────────────────────────────────────
+        if sol_def.get("core_mechanism"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Solution Core Mechanism:",
+                    "body": sol_def["core_mechanism"],
+                    "min_height": 72,
+                }
+            )
+
+        if sol_def.get("problem_solution_fit"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Problem-Solution Fit:",
+                    "body": sol_def["problem_solution_fit"],
+                    "min_height": 64,
+                }
+            )
+
+        if sol_def.get("mvp_scope"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Lean MVP Test Scope:",
+                    "body": sol_def["mvp_scope"],
+                    "min_height": 72,
+                }
+            )
+
+        # ── 6. Value Proposition ──────────────────────────────────────────────
+        if val_prop.get("uvp"):
+            blocks.append(
+                {
+                    "type": "inline",
+                    "label": "Unique Value Proposition",
+                    "body": val_prop["uvp"],
+                    "accent": False,
+                    "min_height": 48,
+                }
+            )
+
+        if val_prop.get("why_choose_this"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Why Choose This Solution:",
+                    "body": val_prop["why_choose_this"],
+                    "min_height": 68,
+                }
+            )
+
+        # ── 7. Feasibility ────────────────────────────────────────────────────
+        feas_parts = []
+        if feas.get("technical_feasibility"):
+            feas_parts.append(f"Technical: {feas['technical_feasibility']}")
+        if feas.get("operational_feasibility"):
+            feas_parts.append(f"Operational: {feas['operational_feasibility']}")
+
+        if feas_parts:
+            blocks.append(
+                {
+                    "type": "inline",
+                    "label": "Feasibility Profile",
+                    "body": " | ".join(feas_parts),
+                    "accent": False,
+                    "min_height": 46,
+                }
+            )
+
+        if feas.get("resource_requirements"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Initial Resource & Capital Requirements:",
+                    "body": feas["resource_requirements"],
+                    "min_height": 72,
+                }
+            )
+
+        # ── 8. Initial Competitor Check ───────────────────────────────────────
+        if comp.get("key_differentiator"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Key Differentiator & Strategic Wedge:",
+                    "body": comp["key_differentiator"],
+                    "min_height": 68,
+                }
+            )
+
+        # ── 9. Decision & Objective Review ────────────────────────────────────
+        if decision.get("objective_review_summary"):
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "title": "Objective Review Summary:",
+                    "body": decision["objective_review_summary"],
+                    "min_height": 80,
+                }
+            )
+
+        # ── 10. Lists & Actionable Next Steps ──────────────────────────────────
         blocks.extend(
             [
-                *self._list_blocks("Strengths", validation_result.get("strengths")),
-                *self._list_blocks("Risks & Concerns", validation_result.get("risks")),
-                *self._list_blocks("Red Flags", iv.get("red_flags")),
+                *self._list_blocks("Quantifiable Benefits", val_prop.get("quantifiable_benefits")),
+                *self._list_blocks("Direct Competitors", comp.get("direct_competitors")),
+                *self._list_blocks("Indirect & Substitute Competitors", comp.get("indirect_competitors")),
+                *self._list_blocks("Discovery Interview Questions", val_surv.get("interview_questions")),
+                *self._list_blocks("Key Survey Metrics to Test", val_surv.get("survey_metrics_to_test")),
                 *self._list_blocks(
                     "Key Falsifiable Assumptions",
-                    iv.get("assumption_list") or validation_result.get("assumptions"),
+                    val_surv.get("riskiest_assumptions")
+                    or iv.get("assumption_list")
+                    or validation_result.get("assumptions"),
                 ),
-                *self._list_blocks("Recommended Next Steps", validation_result.get("recommendations")),
+                *self._list_blocks("Verdict Rationale", decision.get("rationale")),
+                *self._list_blocks(
+                    "7-Day Validation Action Plan",
+                    decision.get("next_7_day_actions") or validation_result.get("recommendations"),
+                ),
+                *self._list_blocks("Strengths", validation_result.get("strengths")),
+                *self._list_blocks("Risks & Concerns", validation_result.get("risks")),
+                *self._list_blocks("Red Flags", iv.get("red_flags") or idea_clarity.get("red_flags")),
             ]
         )
         return [block for block in blocks if block]
@@ -320,6 +570,50 @@ class ReportService:
                 "min_height": 80,
             },
             *self._list_blocks("Hypothesis Questionnaire", question_lines),
+        ]
+        return [block for block in blocks if block]
+
+    def _financial_readiness_blocks(self, agent_results: Dict[str, Any]) -> list[dict[str, Any]]:
+        fin = (agent_results.get("financial_readiness_agent") or {}).get("data") or {}
+        score = fin.get("financial_readiness_score", "N/A")
+        decision = str(fin.get("ai_cfo_decision", "N/A")).replace("_", " ").title()
+        confidence = self._percent(fin.get("confidence", 0.5))
+
+        unit_econ = fin.get("unit_economics_summary") or {}
+        burn_runway = fin.get("burn_and_runway_analysis") or {}
+
+        unit_econ_lines = []
+        if isinstance(unit_econ, dict):
+            for k, v in unit_econ.items():
+                label = k.replace("_", " ").title()
+                unit_econ_lines.append(f"{label}: {v}")
+
+        burn_lines = []
+        if isinstance(burn_runway, dict):
+            for k, v in burn_runway.items():
+                label = k.replace("_", " ").title()
+                burn_lines.append(f"{label}: {v}")
+
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "section",
+                "title": "Financial Readiness & AI CFO Analysis",
+                "metrics": [
+                    ("Financial Score", f"{score}/100"),
+                    ("CFO Decision", decision),
+                    ("Confidence", f"{confidence}%"),
+                ],
+                "min_height": 96,
+            },
+            self._paragraph_block("AI CFO Executive Summary:", fin.get("executive_summary")),
+            self._paragraph_block("Funding Gap Awareness:", fin.get("funding_gap_awareness")),
+            *self._list_blocks("Cost Structure Summary", fin.get("cost_category_summary")),
+            *self._list_blocks("Revenue Model Options", fin.get("revenue_model_options")),
+            *self._list_blocks("Pricing Considerations", fin.get("pricing_consideration_notes")),
+            *self._list_blocks("Unit Economics Overview", unit_econ_lines),
+            *self._list_blocks("Burn Rate & Runway", burn_lines),
+            *self._list_blocks("Financial Risk Flags", fin.get("financial_risk_flags")),
+            *self._list_blocks("Strategic Financial Priorities", fin.get("priority_actions")),
         ]
         return [block for block in blocks if block]
 
@@ -487,6 +781,7 @@ class ReportService:
             "idea_validation_agent": "Idea Validation Report",
             "market_research_agent": "Market Research Report",
             "survey_intelligence_agent": "Survey Intelligence Report",
+            "financial_readiness_agent": "Financial Readiness Report",
             "full": "Startup Validation Report",
             "all": "Startup Validation Report",
         }.get(agent_key, "Startup Validation Report")

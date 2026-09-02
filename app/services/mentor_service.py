@@ -44,14 +44,32 @@ Return ONLY a raw JSON object containing these keys:
 - idea_title: A short, catchy name/title for the venture (string or null)
 - idea_description: Clear description of what the venture does (string or null)
 - problem_statement: The specific customer problem/pain point solved (string or null)
+- target_customer: The specific customer persona or target audience (string or null)
 - industry: Sector or industry (string, default "general")
-- geography: Target market region (string, default "global")
+- geography: Target market region or city (string, default "global")
+- founder_evidence: Stated proof, customer conversations, interviews, waitlist, or pilot data (string or null)
 - founder_validation_goal: What the founder wants to learn from validation (string, default "validate my idea")
 
+- business_stage: Current development stage (e.g. "Idea / Concept", "Pre-MVP", "MVP Live", "Early Revenue", "Scaling", or null)
+- current_monthly_revenue: Current monthly revenue/MRR (e.g. "Pre-Revenue ($0)", "$1,500/mo", "₹50,000/mo", or null)
+- estimated_monthly_costs: Monthly operating expenses/burn (e.g. "Minimal <$500/mo", "$2,000/mo", "₹25,000/mo", or null)
+- budget_range: Total available capital/budget (e.g. "Bootstrapped <$5,000", "$25,000", "₹10 Lakhs", or null)
+- revenue_model_assumption: Planned monetization (e.g. "Direct Product Sales / D2C", "Recurring Subscription (SaaS)", "B2B Wholesale / Bulk Orders", "Freemium", "Commission / Marketplace Take-Rate", "Service / Retainer", or null)
+- pricing_assumption: Target price point/subscription tier/unit price (e.g. "₹799 per bottle", "$25 / unit", "$9.99/mo", "$49/mo", "₹999/mo", "$1,500 per project", or null)
+
 Guidelines:
-1. Do NOT guess or invent details. Only extract what the user has explicitly stated.
-2. If a field was extracted previously and the user hasn't modified it, keep it.
-3. Return raw JSON ONLY. No markdown formatting like ```json ... ```. No extra text.
+1. SUPPORT BOTH PREDEFINED OPTIONS & CUSTOM MESSAGES:
+   - The user may select an option number/label (e.g. "[1] Direct Product Sales", "Option 2", "freemium", "wholesale").
+   - The user may also reply in free-form custom conversational text, custom numbers, or localized currencies (e.g. "we have around 10 lakhs in bank", "spending 30k INR on manufacturing and tools", "selling at ₹799 per bottle", "charging $25 per unit", "aiming for ₹1499 per year per user", "we are pre-revenue students").
+   - Extract and normalize BOTH predefined selections and custom natural language inputs into concise, meaningful values.
+2. SUPPORT ALL BUSINESS TYPES (Physical Products, D2C, E-commerce, Services, SaaS, Marketplaces):
+   - For physical goods/e-commerce/D2C: Extract unit prices, wholesale tiers, and per-item direct sales accurately.
+   - For software/SaaS: Extract monthly/annual subscription tiers, freemium, or usage-based pricing.
+   - For services/consulting: Extract project fees, hourly rates, or monthly retainer figures.
+3. If a field was extracted previously and the user hasn't modified it, keep it.
+4. Only extract what the user has stated; do not invent or hallucinate metrics.
+5. Return raw JSON ONLY. No markdown formatting like ```json ... ```. No extra text.
+
 """
 
 # ── Dynamic workspace state block (appended to skill knowledge base) ─────────────
@@ -67,20 +85,56 @@ Current Workflow State: {state}
 Extracted Idea details: {idea_json}
 Missing required fields to run validation: {missing_fields}
 
+Optional Context Status (Geography / Evidence / Validation Goal): {optional_context_status}
+
 State-Specific Instructions:
 1. If state is GATHERING_INFO:
-   - Ask clarifying, targeted questions to help the founder fill in the missing fields: {missing_fields}.
+   - Ask clarifying, targeted questions to help the founder fill in the core missing idea fields: {missing_fields}.
    - Ask only ONE or TWO clear questions at a time. Keep it conversational.
    - If they gave you a vague description, help them expand it.
    - Provide a useful insight after every two or three questions.
    - Follow the progressive disclosure rules from your knowledge base.
-2. If state is READY_TO_VALIDATE:
-   - Summarize the idea you've understood based on the extracted fields.
-   - Explain that you are ready to trigger the AI Orchestration validation analysis.
-   - Tell them they can click the "Run Validation" button on the dashboard or tell you "Run validation analysis".
-3. If state is VALIDATING:
+   - OPTIONAL CONTEXT QUESTIONS: Once the core idea fields are mostly clear, gently ask (in a single block, as optional):
+     * "Where are you planning to launch first? (e.g., Hyderabad, Pan-India, Global — or skip for global default)"
+     * "Have you spoken to any prospective customers, run any pilots, or gathered early evidence? (or skip — that's fine too)"
+     * "What's the single biggest question or risk you want this validation to answer? (or skip for a general validation)"
+     Make it clear these are optional — the founder can reply 'skip', leave them blank, or answer only some.
+     If the founder already provided these (shown in Optional Context Status), do NOT ask again.
+
+2. If state is GATHERING_FINANCIAL_CONTEXT:
+   - Acknowledge and validate the core idea gathered so far.
+   - Explain politely that to run an accurate AI CFO and Financial Readiness analysis (real unit economics, runway scenarios, and break-even timelines), you need a few quick baseline financial details.
+   - Ask for the missing financial fields: {missing_fields}.
+   - DYNAMIC & CONTEXT-AWARE FINANCIAL OPTIONS (CRITICAL):
+     Do NOT output a rigid generic list. Instead, first analyze the founder's specific idea, industry, and product/service type ({idea_json}), and DYNAMICALLY GENERATE 3 to 4 realistic, highly relevant options tailored directly to their venture:
+     * For **Business Stage**: Generate 4-5 progressive stages relevant to their domain (e.g., Concept, Prototype/Sample, MVP/Beta testing, Initial sales/orders, Scaling).
+     * For **Current Monthly Revenue**: Generate realistic revenue brackets with both USD and INR benchmarks ($0 / ₹0, <$1k / <₹1L, $1k-$10k / ₹1L-₹10L, $10k+ / ₹10L+).
+     * For **Estimated Monthly Costs / Burn**: Generate realistic operational cost brackets for their model (e.g., minimal bootstrapping, lean operations, moderate burn, scaling).
+     * For **Available Capital / Budget**: Generate relevant capital reserve brackets (e.g., savings <$5k / <₹5L, seed $5k-$25k / ₹5L-₹20L, funded $25k+ / ₹20L+).
+     * For **Revenue Model** (DYNAMICALLY DETECT based on their idea):
+       - If physical product / D2C / hardware / consumer goods (e.g. water bottles, fashion, electronics, food): Generate options like [1] Direct Product Sales (D2C / E-commerce per unit), [2] B2B Wholesale / Bulk Orders, [3] Retail Distribution, [4] Product Refill / Replenishment Subscription.
+       - If SaaS / Software / Apps: Generate options like [1] Monthly/Annual Tiered Subscription, [2] Usage-based / Pay-as-you-go, [3] Freemium to Pro upgrade, [4] Enterprise Custom Licensing.
+       - If Marketplace / Platform: Generate options like [1] Commission Take-Rate (% per transaction), [2] Listing / Subscription fees, [3] Premium placement.
+       - If Services / Agency / Consulting: Generate options like [1] Fixed Project Fee, [2] Monthly Retainer, [3] Hourly Rate, [4] Performance-based cut.
+       - If Hybrid or other: Generate blended options matching their exact offering.
+     * For **Target Pricing** (DYNAMICALLY DETECT and suggest realistic price points for their specific product or service in both USD and local/INR currency):
+       - Suggest 3-4 realistic price tiers or unit costs tailored to their specific product (e.g. for eco water bottles: [1] Standard bottle ($15 - $25 / ₹499 - ₹999), [2] Premium insulated ($30 - $50 / ₹1,299 - ₹2,499), [3] Bulk wholesale tier ($8 - $15 / ₹300 - ₹600 per unit, MOQ 50); for SaaS: $19-$49/mo, $99-$199/mo; for an agency: $1,000-$5,000/project).
+   - ALWAYS SUPPORT CUSTOM RESPONSES:
+     Explicitly let the founder know they can select an option number (e.g. '1', '2') OR simply describe their situation in their own custom words, numbers, or currencies.
+   - Ask at most 2 financial categories at a time so the founder is not overwhelmed.
+
+3. If state is READY_TO_VALIDATE:
+   - Summarize the complete idea and financial parameters understood:
+     * Idea & Problem
+     * Business Stage, Revenue & Monthly Burn
+     * Budget, Revenue Model & Target Pricing
+   - Explain that all 4 specialist AI agents (Problem Validation, Market Research, Survey Intelligence, and Financial AI CFO) are ready to analyze the venture.
+   - Tell them they can click the "Run Validation" button on the dashboard or reply "Run validation analysis".
+
+4. If state is VALIDATING:
    - Let the user know the validation engine is processing their idea.
-4. If state is VALIDATED:
+
+5. If state is VALIDATED:
    - Comment on the validation run result.
    - Summarize the final score ({validation_score}/100) and the verdict ({validation_verdict}).
    - Highlight the main strengths and the critical risks.
@@ -99,6 +153,7 @@ def _build_mentor_system_prompt(
     missing_fields: str,
     validation_score: float = 0.0,
     validation_verdict: str = "N/A",
+    optional_context_status: str = "Not yet provided",
 ) -> str:
     """Build the full mentor system prompt by combining the core mentor specification,
     the specific idea validation mentor subpart, and the dynamic workspace state."""
@@ -134,6 +189,7 @@ def _build_mentor_system_prompt(
         missing_fields=missing_fields,
         validation_score=validation_score,
         validation_verdict=validation_verdict,
+        optional_context_status=optional_context_status,
     )
 
     return knowledge_base + workspace_block
@@ -153,6 +209,7 @@ class MentorService:
     @property
     def llm(self):
         """Lazily resolve the LLM gateway on first access."""
+
         if self._llm is None:
             self._llm = get_llm_gateway()
         return self._llm
@@ -191,15 +248,26 @@ class MentorService:
 
         state.conversation_history.append(user_msg_record)
 
+        # If we are gathering info or financial context, run the Information Extractor first
+        # so state transitions (e.g. to READY_TO_VALIDATE) happen immediately on the latest user input.
+        if state.state in ("GATHERING_INFO", "GATHERING_FINANCIAL_CONTEXT"):
+            await self._run_extraction(state, user_id=user_id, db=db)
+
         # Check for system trigger or manual validation command in text
         is_trigger_command = "[TRIGGER_VALIDATION]" in user_message or user_message.lower().strip() in (
-            "run validation", "run validation analysis", "validate", "validate idea", "start validation"
+            "run validation", "run validation analysis", "validate", "validate idea", "start validation",
+            "run validation now", "start validation now", "run analysis"
         )
 
+        # Trigger orchestration if validation requested and ready (or core idea is defined)
+        can_trigger = is_trigger_command and (
+            state.state == "READY_TO_VALIDATE"
+            or (state.idea.get("idea_title") and state.idea.get("idea_description") and state.idea.get("problem_statement"))
+        )
 
-        if is_trigger_command and state.state == "READY_TO_VALIDATE":
+        if can_trigger:
             state.state = "VALIDATING"
-            logger.info(f"[MentorService] State GATHERING_INFO -> VALIDATING for workspace {state.workspace_id}")
+            logger.info(f"[MentorService] State -> VALIDATING for workspace {state.workspace_id}")
             
             try:
                 # Prepare and trigger orchestration
@@ -207,6 +275,24 @@ class MentorService:
                     idea_title=state.idea.get("idea_title") or "Unnamed Venture",
                     idea_description=state.idea.get("idea_description") or "No description provided.",
                     problem_statement=state.idea.get("problem_statement") or "No problem statement.",
+                    target_customer=state.idea.get("target_customer"),
+                    industry=state.idea.get("industry") or "general",
+                    geography=state.idea.get("geography") or "global",
+                    founder_evidence=state.idea.get("founder_evidence"),
+                    founder_validation_goal=state.idea.get("founder_validation_goal") or "validate my idea",
+                    additional_context={
+                        "target_customer": state.idea.get("target_customer"),
+                        "industry": state.idea.get("industry") or "general",
+                        "geography": state.idea.get("geography") or "global",
+                        "founder_evidence": state.idea.get("founder_evidence"),
+                        "founder_validation_goal": state.idea.get("founder_validation_goal") or "validate my idea",
+                        "business_stage": state.idea.get("business_stage"),
+                        "current_monthly_revenue": state.idea.get("current_monthly_revenue"),
+                        "estimated_monthly_costs": state.idea.get("estimated_monthly_costs"),
+                        "budget_range": state.idea.get("budget_range"),
+                        "revenue_model_assumption": state.idea.get("revenue_model_assumption"),
+                        "pricing_assumption": state.idea.get("pricing_assumption"),
+                    }
                 )
 
                 request = OrchestrationRequest(
@@ -237,10 +323,6 @@ class MentorService:
                     "content": "I encountered an unexpected error running the validation engine. Let's try triggering it again."
                 })
                 return state
-
-        # If we are gathering info, run the Information Extractor first
-        if state.state == "GATHERING_INFO":
-            await self._run_extraction(state, user_id=user_id, db=db)
 
         # Generate conversational response
         await self._generate_mentor_reply(state, image_data_uris=image_data_uris, user_id=user_id, db=db)
@@ -301,11 +383,33 @@ class MentorService:
                 )
 
                 # Programmatic check of required fields
-                required = ["idea_title", "idea_description", "problem_statement"]
-                missing = [f for f in required if not state.idea.get(f)]
-                if not missing:
+                core_required = ["idea_title", "idea_description", "problem_statement"]
+                missing_core = [f for f in core_required if not state.idea.get(f)]
+
+                financial_required = [
+                    "business_stage",
+                    "current_monthly_revenue",
+                    "estimated_monthly_costs",
+                    "budget_range",
+                    "revenue_model_assumption",
+                    "pricing_assumption",
+                ]
+                missing_financial = [f for f in financial_required if not state.idea.get(f)]
+
+                if missing_core:
+                    state.state = "GATHERING_INFO"
+                elif missing_financial:
+                    state.state = "GATHERING_FINANCIAL_CONTEXT"
+                    logger.info(
+                        "[MentorService] Core fields satisfied for '%s'. State -> GATHERING_FINANCIAL_CONTEXT (missing: %s)",
+                        state.workspace_id, missing_financial,
+                    )
+                else:
                     state.state = "READY_TO_VALIDATE"
-                    logger.info(f"[MentorService] All required fields satisfied for workspace '{state.workspace_id}'! State -> READY_TO_VALIDATE")
+                    logger.info(
+                        "[MentorService] All core & financial fields satisfied for workspace '%s'! State -> READY_TO_VALIDATE",
+                        state.workspace_id,
+                    )
 
         except Exception as e:
             logger.warning(f"[MentorService] Extraction step failed: {e}. Continuing conversation without it.")
@@ -318,9 +422,23 @@ class MentorService:
         db: Optional[Any] = None,
     ) -> None:
         """Call LLM with current workspace state to write assistant response."""
-        # Find missing required fields
-        required = ["idea_title", "idea_description", "problem_statement"]
-        missing = [f.replace("_", " ").title() for f in required if not state.idea.get(f)]
+        # Find missing required fields according to current state
+        core_required = ["idea_title", "idea_description", "problem_statement"]
+        financial_required = [
+            "business_stage",
+            "current_monthly_revenue",
+            "estimated_monthly_costs",
+            "budget_range",
+            "revenue_model_assumption",
+            "pricing_assumption",
+        ]
+
+        if state.state == "GATHERING_INFO":
+            missing = [f.replace("_", " ").title() for f in core_required if not state.idea.get(f)]
+        elif state.state == "GATHERING_FINANCIAL_CONTEXT":
+            missing = [f.replace("_", " ").title() for f in financial_required if not state.idea.get(f)]
+        else:
+            missing = []
 
         # Get validation context if we just validated
         score = 0.0
@@ -329,6 +447,22 @@ class MentorService:
             score = state.validation_result.get("validation_score", 0.0)
             verdict = str(state.validation_result.get("verdict", "hold")).upper()
 
+        # Build optional context status — tells Arya which soft fields are filled vs still needed
+        _geo = state.idea.get("geography")
+        _evidence = state.idea.get("founder_evidence")
+        _goal = state.idea.get("founder_validation_goal")
+        optional_parts = []
+        optional_parts.append(
+            f"Geography: {'\"' + _geo + '\" (provided)' if _geo and _geo != 'global' else 'Not yet provided (will default to global)'}"
+        )
+        optional_parts.append(
+            f"Early Evidence: {'\"' + _evidence + '\" (provided)' if _evidence else 'Not yet provided (will default to none)'}"
+        )
+        optional_parts.append(
+            f"Validation Goal: {'\"' + _goal + '\" (provided)' if _goal and _goal != 'validate my idea' else 'Not yet provided (will default to general validation)'}"
+        )
+        optional_context_status = " | ".join(optional_parts)
+
         sys_prompt = _build_mentor_system_prompt(
             workspace_id=state.workspace_id,
             state=state.state,
@@ -336,6 +470,7 @@ class MentorService:
             missing_fields=", ".join(missing) if missing else "None",
             validation_score=score,
             validation_verdict=verdict,
+            optional_context_status=optional_context_status,
         )
 
         # Build prompt using chat messages

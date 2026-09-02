@@ -17,6 +17,7 @@ WORKFLOW_AGENT_MAP: dict[WorkflowType, list[str]] = {
         "idea_validation_agent",
         "market_research_agent",
         "survey_intelligence_agent",
+        "financial_readiness_agent",
     ],
     WorkflowType.SURVEY_GENERATION: [
         "survey_intelligence_agent",

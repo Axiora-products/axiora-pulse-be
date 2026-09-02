@@ -76,6 +76,23 @@ class MultiAgentMockLLMGateway:
                 "red_flags": [],
                 "confidence": 0.85,
             })
+        elif "financial_readiness" in system_prompt or "cfo" in system_prompt or "financial" in system_prompt:
+            content = json.dumps({
+                "financial_readiness_score": 85.0,
+                "ai_cfo_decision": "proceed_to_validation",
+                "executive_summary": "Solid unit economics and viable pricing model.",
+                "unit_economics_summary": {
+                    "estimated_cac": "$50",
+                    "target_price": "$99/mo",
+                    "gross_margin": "85%"
+                },
+                "burn_and_runway_analysis": {
+                    "monthly_burn": "$2,000",
+                    "estimated_runway_months": "12"
+                },
+                "confidence": 0.88,
+                "disclaimer": "This output provides decision-support guidance only."
+            })
         else: # survey_intelligence_agent
             content = json.dumps({
                 "survey_title": "B2B Founder Validation Survey",
@@ -205,13 +222,14 @@ async def test_full_pipeline_orchestration():
         assert response.result is not None
         assert response.result.validation_score >= 80.0
         assert response.result.verdict == "build"
-        assert len(response.result.agent_results) == 3
+        assert len(response.result.agent_results) == 4
         assert "idea_validation_agent" in response.result.agent_results
         assert "market_research_agent" in response.result.agent_results
         assert "survey_intelligence_agent" in response.result.agent_results
+        assert "financial_readiness_agent" in response.result.agent_results
 
         logger.info(
-            f"✓ Test 3 Passed: Pipeline executed 3 agents cleanly! "
+            f"✓ Test 3 Passed: Pipeline executed 4 agents cleanly! "
             f"Score={response.result.validation_score}, Verdict={response.result.verdict}"
         )
     finally:
@@ -222,7 +240,7 @@ async def main():
     await test_mcp_permissions()
     test_orm_models()
     await test_full_pipeline_orchestration()
-    print("\n🎉 ALL INTEGRATION TESTS PASSED SUCCESSFULLY UP TO SURVEY INTELLIGENCE AGENT!")
+    print("\n*** ALL INTEGRATION TESTS PASSED SUCCESSFULLY (4-AGENT PIPELINE)! ***")
 
 
 if __name__ == "__main__":

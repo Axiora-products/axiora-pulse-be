@@ -28,6 +28,11 @@ class IdeaInput(BaseModel):
     idea_title: str = Field(..., min_length=3, description="Short name of the idea")
     idea_description: str = Field(..., min_length=10, description="Full description of the idea")
     problem_statement: str = Field(..., min_length=10, description="The core problem being solved")
+    target_customer: Optional[str] = Field(default=None, description="Specific customer persona or target audience")
+    industry: Optional[str] = Field(default="general", description="Industry or sector")
+    geography: Optional[str] = Field(default="global", description="Target market region or city")
+    business_type: Optional[str] = Field(default="Unclear", description="B2B, B2C, B2B2C, or Unclear")
+    founder_validation_goal: Optional[str] = Field(default="validate my idea", description="Specific validation goal or hypothesis to test")
     founder_evidence: Optional[str] = Field(default=None, description="Stated evidence, prior experience, or existing data")
 
 
