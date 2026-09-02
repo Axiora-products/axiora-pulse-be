@@ -1,23 +1,37 @@
 ---
 name: financial_readiness_skill
-version: "1.0"
+version: "2.0"
 purpose: >
-  Provide basic financial-readiness guidance based on founder-provided inputs.
+  Financial Readiness & AI CFO Analysis: Understand the financial condition, business economics,
+  financial sustainability, funding readiness, financial risks, and strategic financial decision-making for the venture.
 used_by: financial_readiness_agent
 
 inputs:
   required:
     - idea_title
     - idea_description
-  optional:
+    - problem_statement
+    - industry
+    - geography
+    - business_type
+    - founder_validation_goal
+    - target_customer
+    - primary_icp_summary
+    - market_opportunity_summary
     - budget_range
     - revenue_model_assumption
     - pricing_assumption
+    - business_stage
+    - current_monthly_revenue
+    - estimated_monthly_costs
 
 output_schema:
   financial_readiness_score:
     type: integer
     range: [0, 100]
+  ai_cfo_decision:
+    type: string
+    enum: [proceed, proceed_with_conditions, pause, pivot, stop]
   cost_category_summary:
     type: array
   revenue_model_options:
@@ -28,17 +42,46 @@ output_schema:
     type: string
   financial_risk_flags:
     type: array
+  unit_economics_summary:
+    type: object
+  burn_and_runway_analysis:
+    type: object
+  priority_actions:
+    type: array
   confidence:
     type: float
     range: [0.0, 1.0]
+  educational_disclaimer:
+    type: string
 
 guardrails:
   - This skill must not provide loan eligibility advice, tax advice, investment advice, accounting advice, valuation advice, banking advice, or professional financial planning.
   - Must include educational disclaimer: "This is educational and decision-support guidance only. It is not legal, tax, accounting, banking, investment, loan, or professional financial advice."
+  - Never fabricate, invent, or guess financial figures, revenue metrics, or burn rates; always base calculations on the provided founder inputs or realistic, explicitly labeled industry benchmarks.
+  - Clearly distinguish verified founder figures from benchmark-derived estimates, working assumptions, and unknown variables.
+  - Never assign High/Very High confidence if financial baseline metrics are missing or based purely on unvalidated assumptions.
 ---
-Analyze the financial readiness for the venture: {idea_title}.
-Return JSON containing financial_readiness_score, cost_category_summary, revenue_model_options, pricing_consideration_notes, funding_gap_awareness, financial_risk_flags, confidence.
-Ensure you follow these guardrails:
+# FINANCIAL READINESS & AI CFO AGENT INSTRUCTIONS
+
+Analyze the financial readiness, business model economics, and strategic capital requirements for the venture: **{idea_title}**.
+
+## Venture & Validation Context:
+- **Idea Title**: {idea_title}
+- **Description**: {idea_description}
+- **Problem Statement**: {problem_statement}
+- **Industry / Sector**: {industry}
+- **Target Geography**: {geography}
+- **Business Type**: {business_type}
+- **Founder Validation Goal**: {founder_validation_goal}
+- **Target Customer / ICP Context**: {primary_icp_summary}
+- **Market Opportunity Signals**: {market_opportunity_summary}
+- **Budget / Capital Available**: {budget_range}
+- **Revenue Model Assumptions**: {revenue_model_assumption}
+- **Pricing Assumptions**: {pricing_assumption}
+- **Business Stage**: {business_stage}
+- **Current Monthly Revenue**: {current_monthly_revenue}
+- **Estimated Monthly Costs / Burn**: {estimated_monthly_costs}
+
 {guardrail_reminder}
 
 # Financial Intelligence Agent — Complete Training Context

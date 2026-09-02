@@ -89,12 +89,11 @@ Optional Context Status (Geography / Evidence / Validation Goal): {optional_cont
 
 State-Specific Instructions:
 1. If state is GATHERING_INFO:
-   - Ask clarifying, targeted questions to help the founder fill in the missing fields: {missing_fields}.
+   - Ask clarifying, targeted questions to help the founder fill in the core missing idea fields: {missing_fields}.
    - Ask only ONE or TWO clear questions at a time. Keep it conversational.
    - If they gave you a vague description, help them expand it.
    - Provide a useful insight after every two or three questions.
    - Follow the progressive disclosure rules from your knowledge base.
-
    - OPTIONAL CONTEXT QUESTIONS: Once the core idea fields are mostly clear, gently ask (in a single block, as optional):
      * "Where are you planning to launch first? (e.g., Hyderabad, Pan-India, Global — or skip for global default)"
      * "Have you spoken to any prospective customers, run any pilots, or gathered early evidence? (or skip — that's fine too)"
@@ -102,6 +101,7 @@ State-Specific Instructions:
      Make it clear these are optional — the founder can reply 'skip', leave them blank, or answer only some.
      If the founder already provided these (shown in Optional Context Status), do NOT ask again.
 
+2. If state is GATHERING_FINANCIAL_CONTEXT:
    - Acknowledge and validate the core idea gathered so far.
    - Explain politely that to run an accurate AI CFO and Financial Readiness analysis (real unit economics, runway scenarios, and break-even timelines), you need a few quick baseline financial details.
    - Ask for the missing financial fields: {missing_fields}.
@@ -122,6 +122,7 @@ State-Specific Instructions:
    - ALWAYS SUPPORT CUSTOM RESPONSES:
      Explicitly let the founder know they can select an option number (e.g. '1', '2') OR simply describe their situation in their own custom words, numbers, or currencies.
    - Ask at most 2 financial categories at a time so the founder is not overwhelmed.
+
 3. If state is READY_TO_VALIDATE:
    - Summarize the complete idea and financial parameters understood:
      * Idea & Problem
@@ -129,9 +130,11 @@ State-Specific Instructions:
      * Budget, Revenue Model & Target Pricing
    - Explain that all 4 specialist AI agents (Problem Validation, Market Research, Survey Intelligence, and Financial AI CFO) are ready to analyze the venture.
    - Tell them they can click the "Run Validation" button on the dashboard or reply "Run validation analysis".
+
 4. If state is VALIDATING:
    - Let the user know the validation engine is processing their idea.
-4. If state is VALIDATED:
+
+5. If state is VALIDATED:
    - Comment on the validation run result.
    - Summarize the final score ({validation_score}/100) and the verdict ({validation_verdict}).
    - Highlight the main strengths and the critical risks.
@@ -206,6 +209,7 @@ class MentorService:
     @property
     def llm(self):
         """Lazily resolve the LLM gateway on first access."""
+
         if self._llm is None:
             self._llm = get_llm_gateway()
         return self._llm
@@ -244,15 +248,26 @@ class MentorService:
 
         state.conversation_history.append(user_msg_record)
 
+        # If we are gathering info or financial context, run the Information Extractor first
+        # so state transitions (e.g. to READY_TO_VALIDATE) happen immediately on the latest user input.
+        if state.state in ("GATHERING_INFO", "GATHERING_FINANCIAL_CONTEXT"):
+            await self._run_extraction(state, user_id=user_id, db=db)
+
         # Check for system trigger or manual validation command in text
         is_trigger_command = "[TRIGGER_VALIDATION]" in user_message or user_message.lower().strip() in (
-            "run validation", "run validation analysis", "validate", "validate idea", "start validation"
+            "run validation", "run validation analysis", "validate", "validate idea", "start validation",
+            "run validation now", "start validation now", "run analysis"
         )
 
+        # Trigger orchestration if validation requested and ready (or core idea is defined)
+        can_trigger = is_trigger_command and (
+            state.state == "READY_TO_VALIDATE"
+            or (state.idea.get("idea_title") and state.idea.get("idea_description") and state.idea.get("problem_statement"))
+        )
 
-        if is_trigger_command and state.state == "READY_TO_VALIDATE":
+        if can_trigger:
             state.state = "VALIDATING"
-            logger.info(f"[MentorService] State GATHERING_INFO -> VALIDATING for workspace {state.workspace_id}")
+            logger.info(f"[MentorService] State -> VALIDATING for workspace {state.workspace_id}")
             
             try:
                 # Prepare and trigger orchestration
@@ -278,7 +293,6 @@ class MentorService:
                         "revenue_model_assumption": state.idea.get("revenue_model_assumption"),
                         "pricing_assumption": state.idea.get("pricing_assumption"),
                     }
-
                 )
 
                 request = OrchestrationRequest(
@@ -309,10 +323,6 @@ class MentorService:
                     "content": "I encountered an unexpected error running the validation engine. Let's try triggering it again."
                 })
                 return state
-
-        # If we are gathering info, run the Information Extractor first
-        if state.state == "GATHERING_INFO":
-            await self._run_extraction(state, user_id=user_id, db=db)
 
         # Generate conversational response
         await self._generate_mentor_reply(state, image_data_uris=image_data_uris, user_id=user_id, db=db)
@@ -373,11 +383,33 @@ class MentorService:
                 )
 
                 # Programmatic check of required fields
-                required = ["idea_title", "idea_description", "problem_statement"]
-                missing = [f for f in required if not state.idea.get(f)]
-                if not missing:
+                core_required = ["idea_title", "idea_description", "problem_statement"]
+                missing_core = [f for f in core_required if not state.idea.get(f)]
+
+                financial_required = [
+                    "business_stage",
+                    "current_monthly_revenue",
+                    "estimated_monthly_costs",
+                    "budget_range",
+                    "revenue_model_assumption",
+                    "pricing_assumption",
+                ]
+                missing_financial = [f for f in financial_required if not state.idea.get(f)]
+
+                if missing_core:
+                    state.state = "GATHERING_INFO"
+                elif missing_financial:
+                    state.state = "GATHERING_FINANCIAL_CONTEXT"
+                    logger.info(
+                        "[MentorService] Core fields satisfied for '%s'. State -> GATHERING_FINANCIAL_CONTEXT (missing: %s)",
+                        state.workspace_id, missing_financial,
+                    )
+                else:
                     state.state = "READY_TO_VALIDATE"
-                    logger.info(f"[MentorService] All required fields satisfied for workspace '{state.workspace_id}'! State -> READY_TO_VALIDATE")
+                    logger.info(
+                        "[MentorService] All core & financial fields satisfied for workspace '%s'! State -> READY_TO_VALIDATE",
+                        state.workspace_id,
+                    )
 
         except Exception as e:
             logger.warning(f"[MentorService] Extraction step failed: {e}. Continuing conversation without it.")
@@ -390,9 +422,23 @@ class MentorService:
         db: Optional[Any] = None,
     ) -> None:
         """Call LLM with current workspace state to write assistant response."""
-        # Find missing required fields
-        required = ["idea_title", "idea_description", "problem_statement"]
-        missing = [f.replace("_", " ").title() for f in required if not state.idea.get(f)]
+        # Find missing required fields according to current state
+        core_required = ["idea_title", "idea_description", "problem_statement"]
+        financial_required = [
+            "business_stage",
+            "current_monthly_revenue",
+            "estimated_monthly_costs",
+            "budget_range",
+            "revenue_model_assumption",
+            "pricing_assumption",
+        ]
+
+        if state.state == "GATHERING_INFO":
+            missing = [f.replace("_", " ").title() for f in core_required if not state.idea.get(f)]
+        elif state.state == "GATHERING_FINANCIAL_CONTEXT":
+            missing = [f.replace("_", " ").title() for f in financial_required if not state.idea.get(f)]
+        else:
+            missing = []
 
         # Get validation context if we just validated
         score = 0.0

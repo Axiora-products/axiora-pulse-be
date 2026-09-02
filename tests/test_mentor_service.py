@@ -184,3 +184,147 @@ def test_report_service_renders_all_10_sections():
     assert "Objective Review Summary:" in titles
     assert "7-Day Validation Action Plan" in titles
     assert "Direct Competitors" in titles
+
+
+# ── Mentor State Machine & Financial Context Tests ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_mentor_state_transitions_to_gathering_financial_context():
+    state = WorkspaceMentorState(
+        workspace_id="ws-fin-test",
+        state="GATHERING_INFO",
+        idea={},
+        conversation_history=[
+            {"role": "user", "content": "I am building an automated invoicing tool called QuickBill to stop invoice delays."}
+        ]
+    )
+
+    mock_extractor_res = MagicMock()
+    mock_extractor_res.success = True
+    mock_extractor_res.tokens_input = 100
+    mock_extractor_res.tokens_output = 50
+    mock_extractor_res.total_tokens = 150
+    mock_extractor_res.content = json.dumps({
+        "idea_title": "QuickBill",
+        "idea_description": "Automated invoicing tool",
+        "problem_statement": "Small businesses suffer from late client invoice payments",
+        "business_stage": None,
+        "current_monthly_revenue": None,
+        "estimated_monthly_costs": None,
+        "budget_range": None,
+        "revenue_model_assumption": None,
+        "pricing_assumption": None,
+    })
+
+    mock_llm = MagicMock()
+    mock_llm.complete = AsyncMock(return_value=mock_extractor_res)
+
+    with patch.object(mentor_service, "_llm", mock_llm):
+        await mentor_service._run_extraction(state)
+
+    # Core fields are extracted, so state should move to GATHERING_FINANCIAL_CONTEXT
+    assert state.state == "GATHERING_FINANCIAL_CONTEXT"
+    assert state.idea["idea_title"] == "QuickBill"
+    assert state.idea["problem_statement"] == "Small businesses suffer from late client invoice payments"
+
+    # Now simulate user providing financial baseline numbers
+    mock_extractor_res2 = MagicMock()
+    mock_extractor_res2.success = True
+    mock_extractor_res2.tokens_input = 120
+    mock_extractor_res2.tokens_output = 60
+    mock_extractor_res2.total_tokens = 180
+    mock_extractor_res2.content = json.dumps({
+        "business_stage": "Pre-MVP",
+        "current_monthly_revenue": "$0",
+        "estimated_monthly_costs": "$1,500/mo",
+        "budget_range": "$10,000",
+        "revenue_model_assumption": "SaaS Subscription",
+        "pricing_assumption": "$49/mo",
+    })
+
+    mock_llm2 = MagicMock()
+    mock_llm2.complete = AsyncMock(return_value=mock_extractor_res2)
+
+    with patch.object(mentor_service, "_llm", mock_llm2):
+        await mentor_service._run_extraction(state)
+
+    # All financial fields satisfied -> READY_TO_VALIDATE
+    assert state.state == "READY_TO_VALIDATE"
+    assert state.idea["pricing_assumption"] == "$49/mo"
+    assert state.idea["budget_range"] == "$10,000"
+
+
+@pytest.mark.asyncio
+async def test_process_message_full_lifecycle_trigger_validation():
+    # 1. State starts in GATHERING_FINANCIAL_CONTEXT
+    state = WorkspaceMentorState(
+        workspace_id="ws-e2e-test",
+        state="GATHERING_FINANCIAL_CONTEXT",
+        idea={
+            "idea_title": "EcoBottle",
+            "idea_description": "Insulated smart water bottle",
+            "problem_statement": "Plastic waste and lack of hydration tracking",
+        },
+        conversation_history=[
+            {"role": "assistant", "content": "What is your target pricing and budget?"}
+        ]
+    )
+
+    # 2. User sends financial message
+    mock_extractor_res = MagicMock()
+    mock_extractor_res.success = True
+    mock_extractor_res.tokens_input = 100
+    mock_extractor_res.tokens_output = 50
+    mock_extractor_res.total_tokens = 150
+    mock_extractor_res.content = json.dumps({
+        "business_stage": "Pre-MVP",
+        "current_monthly_revenue": "$0",
+        "estimated_monthly_costs": "$500/mo",
+        "budget_range": "$5,000",
+        "revenue_model_assumption": "D2C Sales",
+        "pricing_assumption": "$29/bottle",
+    })
+
+    mock_reply_res = MagicMock()
+    mock_reply_res.success = True
+    mock_reply_res.tokens_input = 150
+    mock_reply_res.tokens_output = 80
+    mock_reply_res.total_tokens = 230
+    mock_reply_res.content = "Great! Everything is set. Click 'Run Validation' or type 'run validation' to start."
+
+    mock_llm = MagicMock()
+    # First call is extractor, second call is reply generator
+    mock_llm.complete = AsyncMock(side_effect=[mock_extractor_res, mock_reply_res])
+
+    with patch.object(mentor_service, "_llm", mock_llm):
+        res_state = await mentor_service.process_message(
+            state=state,
+            user_message="We are Pre-MVP, selling D2C at $29/bottle with $5,000 budget.",
+        )
+
+    # State transitioned to READY_TO_VALIDATE
+    assert res_state.state == "READY_TO_VALIDATE"
+    assert res_state.idea["pricing_assumption"] == "$29/bottle"
+    assert "Click 'Run Validation'" in res_state.conversation_history[-1]["content"]
+
+    # 3. User says "Run validation"
+    mock_orch_resp = MagicMock()
+    mock_orch_resp.status = "success"
+    mock_orch_resp.result = MagicMock()
+    mock_orch_resp.result.json = MagicMock(return_value=json.dumps({
+        "validation_score": 88.0,
+        "verdict": "build",
+        "agent_results": {}
+    }))
+
+    with patch("app.services.mentor_service.orchestrator.run", AsyncMock(return_value=mock_orch_resp)):
+        with patch.object(mentor_service, "_llm", mock_llm):
+            final_state = await mentor_service.process_message(
+                state=res_state,
+                user_message="run validation",
+            )
+
+    assert final_state.state == "VALIDATED"
+    assert final_state.validation_result["validation_score"] == 88.0
+
+
