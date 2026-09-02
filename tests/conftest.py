@@ -5,7 +5,7 @@ import pytest_asyncio
 from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import patch
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from httpx import AsyncClient, ASGITransport
 
@@ -18,7 +18,7 @@ os.environ.setdefault("JWT_ALGORITHM", "HS256")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 os.environ.setdefault("OTP_EXPIRE_MINUTES", "10")
 
-from app.db.models import Base, User
+from app.db.models import Base, Role, User
 from app.core.security import hash_password_async
 from main import app
 from app.db.database import get_db
@@ -31,28 +31,39 @@ limiter.enabled = False
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 _UPLOADS_WORKSPACES_DIR = Path("uploads/workspaces")
+_UPLOADS_AVATARS_DIR = Path("uploads/avatars")
 
 
 @pytest.fixture(autouse=True)
 def _cleanup_local_upload_files():
     """Remove any files s3_storage_service falls back to writing under
-    uploads/workspaces/ during a test (no AWS credentials configured in
-    the test environment). Prevents test runs from leaving disk artifacts
-    behind on every pytest invocation. Tracks individual files (not just
-    top-level workspace directories) so new files written inside an
-    already-existing workspace folder are still caught."""
-    before = set(_UPLOADS_WORKSPACES_DIR.rglob("*")) if _UPLOADS_WORKSPACES_DIR.exists() else set()
+    uploads/workspaces/ and uploads/avatars/ during a test (no AWS credentials
+    configured in the test environment). Prevents test runs from leaving disk
+    artifacts behind on every pytest invocation. Tracks individual files so
+    new files written inside an already-existing folder are still caught."""
+    before_w = set(_UPLOADS_WORKSPACES_DIR.rglob("*")) if _UPLOADS_WORKSPACES_DIR.exists() else set()
+    before_a = set(_UPLOADS_AVATARS_DIR.rglob("*")) if _UPLOADS_AVATARS_DIR.exists() else set()
     yield
-    if not _UPLOADS_WORKSPACES_DIR.exists():
-        return
-    after = set(_UPLOADS_WORKSPACES_DIR.rglob("*"))
-    for entry in sorted(after - before, key=lambda p: len(p.parts), reverse=True):
-        if not entry.exists():
-            continue
-        if entry.is_dir():
-            shutil.rmtree(entry, ignore_errors=True)
-        else:
-            entry.unlink(missing_ok=True)
+    # Clean workspaces
+    if _UPLOADS_WORKSPACES_DIR.exists():
+        after_w = set(_UPLOADS_WORKSPACES_DIR.rglob("*"))
+        for entry in sorted(after_w - before_w, key=lambda p: len(p.parts), reverse=True):
+            if not entry.exists():
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+    # Clean avatars
+    if _UPLOADS_AVATARS_DIR.exists():
+        after_a = set(_UPLOADS_AVATARS_DIR.rglob("*"))
+        for entry in sorted(after_a - before_a, key=lambda p: len(p.parts), reverse=True):
+            if not entry.exists():
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
 
 @pytest.fixture(autouse=True)
 def _reset_dependency_overrides():
@@ -132,13 +143,32 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
             await session.execute(table.delete())
         await session.commit()
 
+@pytest_asyncio.fixture(autouse=True)
+async def _seed_roles(db_session: AsyncSession):
+    """Ensure all three roles exist in the test database before each test."""
+    for role_name, desc in [
+        ("admin", "Full platform access; bypasses subscription checks"),
+        ("member", "Paid subscription user"),
+        ("viewer", "Starter / free-tier user"),
+    ]:
+        exists = (await db_session.execute(select(Role).where(Role.name == role_name))).scalar_one_or_none()
+        if exists is None:
+            db_session.add(Role(name=role_name, description=desc))
+    await db_session.flush()
+    yield
+
 @pytest_asyncio.fixture
 async def normal_user(db_session: AsyncSession) -> User:
+    member_role = (await db_session.execute(select(Role).where(Role.name == "member"))).scalar_one_or_none()
+    if member_role is None:
+        member_role = Role(name="member", description="Paid subscription user")
+        db_session.add(member_role)
+        await db_session.flush()
     user = User(
         username="user@axiorapulse.com",
         password=await hash_password_async("Test@12345"),
-        role="user",
-        register_mfa=True
+        register_mfa=True,
+        role=member_role,
     )
     db_session.add(user)
     await db_session.commit()
@@ -147,11 +177,16 @@ async def normal_user(db_session: AsyncSession) -> User:
 
 @pytest_asyncio.fixture
 async def admin_user(db_session: AsyncSession) -> User:
+    admin_role = (await db_session.execute(select(Role).where(Role.name == "admin"))).scalar_one_or_none()
+    if admin_role is None:
+        admin_role = Role(name="admin", description="Full platform access; bypasses subscription checks")
+        db_session.add(admin_role)
+        await db_session.flush()
     user = User(
         username="admin@axiorapulse.com",
         password=await hash_password_async("Test@12345"),
-        role="admin",
-        register_mfa=True
+        register_mfa=True,
+        role=admin_role,
     )
     db_session.add(user)
     await db_session.commit()

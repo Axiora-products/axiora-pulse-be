@@ -42,10 +42,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _ACCESS_TOKEN_MINS = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
-from app.db.models import AuthActions, RefreshSession, User
+from app.core.google_auth import GoogleTokenError, verify_google_id_token
+from app.db.models import AuthActions, RefreshSession, Role, User, UserDetails
 from app.models.auth_models import (
     AdminLoginResponse,
     AuthActionsData,
+    GoogleAuthRequest,
+    GoogleAuthResponse,
     RegisterAuthActionsData,
     LoginSuccessResponse,
     RegisterResponse,
@@ -83,9 +86,15 @@ async def seed_admin_user(db: AsyncSession) -> None:
 
     hashed_pw = await hash_password_async("Test@12345")
 
+    admin_role = await _get_role(db, "admin")
+    if admin_role is None:
+        admin_role = Role(name="admin", description="Full platform access; bypasses subscription checks")
+        db.add(admin_role)
+        await db.flush()
+
     if admin_user is None:
         admin_user = User(
-            role="admin",
+            role=admin_role,
             username=admin_email,
             password=hashed_pw,
             register_mfa=True,
@@ -94,7 +103,8 @@ async def seed_admin_user(db: AsyncSession) -> None:
         await db.commit()
         logger.info("Created default admin user: %s", admin_email)
     else:
-        admin_user.role = "admin"
+        if not admin_user.has_role("admin"):
+            admin_user.role = admin_role
         admin_user.password = hashed_pw
         admin_user.register_mfa = True
         await db.commit()
@@ -121,6 +131,12 @@ async def _get_user_by_id(db: AsyncSession, user_id: int) -> User:
 async def _get_user_by_username(db: AsyncSession, username: str) -> User | None:
     """Fetch a user by username (email). Returns None if not found."""
     result = await db.execute(select(User).where(User.username == username.lower().strip()))
+    return result.scalar_one_or_none()
+
+
+async def _get_role(db: AsyncSession, role_name: str) -> Role | None:
+    """Fetch a Role row by name (viewer | member | admin). Returns None if absent."""
+    result = await db.execute(select(Role).where(Role.name == role_name))
     return result.scalar_one_or_none()
 
 
@@ -170,7 +186,7 @@ def _to_register_response(user: User) -> RegisterResponse:
 async def _issue_token_pair(user: User, db: AsyncSession) -> tuple[str, str]:
     """Create an access token and a rotating, server-revocable refresh session."""
     session_id = str(uuid4())
-    token_data = {"sub": str(user.id), "username": user.username, "role": user.role}
+    token_data = {"sub": str(user.id), "username": user.username, "role": user._primary_role}
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data={**token_data, "sid": session_id})
     db.add(RefreshSession(id=session_id, user_id=user.id, expires_at=datetime.now(tz=timezone.utc) + timedelta(days=7)))
@@ -193,6 +209,21 @@ async def _get_or_create_auth_actions(user_id: int, db: AsyncSession) -> AuthAct
         await db.flush()
         logger.info("Created auth_actions row for user_id=%s with defaults.", user_id)
     return row
+
+
+async def _has_active_payment(user: User, db: AsyncSession) -> bool:
+    """Live payment-gate state for the auth response's `payment` flag.
+
+    Reads the single billing chokepoint (`has_active_entitlement`), which checks
+    for an entitled Subscription — or returns True for everyone when
+    SUBSCRIPTION_ENFORCED is disabled. This replaces the static, always-True
+    `auth_actions.payment` column so the frontend's `hasActivePlan` reflects the
+    user's real subscription: paid users land on the dashboard, unpaid users are
+    routed to pricing. Imported lazily to avoid an import-time service cycle.
+    """
+    from app.services.billing_service import billing_service
+
+    return await billing_service.has_active_entitlement(user, db)
 
 
 # ── Auth Service ───────────────────────────────────────────────────────────────
@@ -258,8 +289,10 @@ class AuthService:
         otp = generate_otp()
         expiry = otp_expiry()
 
+        # Default role for new sign-ups is "viewer" (upgraded to "member" on payment)
+        default_role = await _get_role(db, "viewer")
         user = User(
-            role="user",
+            role=default_role,
             username=username,
             password=await hash_password_async(request.password),
             register_otp=otp,
@@ -368,7 +401,7 @@ class AuthService:
             logger.info("Login OTP verified via verify_otp for user id=%s (%s)", user.id, user.username)
 
             auth_actions_row = await _get_or_create_auth_actions(user.id, db)
-            actions = ["dashboard"] if user.role == "admin" else []
+            actions = ["dashboard"] if user.has_role("admin") else []
             return VerifyOTPResponse(
                 status="success",
                 message="Login OTP Validated Successfully !",
@@ -376,10 +409,10 @@ class AuthService:
                 refresh_token=refresh_token,
                 token_type="bearer",
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
-                role=user.role,
+                role=user._primary_role,
                 actions=actions,
                 auth_actions=AuthActionsData(
-                    payment=auth_actions_row.payment,
+                    payment=await _has_active_payment(user, db),
                     interactive_questions=auth_actions_row.interactive_questions,
                 ),
             )
@@ -432,7 +465,7 @@ class AuthService:
             )
 
             auth_actions_row = await _get_or_create_auth_actions(user.id, db)
-            actions = ["dashboard"] if user.role == "admin" else []
+            actions = ["dashboard"] if user.has_role("admin") else []
             return VerifyOTPResponse(
                 status="success",
                 message="OTP Validated Successfully !",
@@ -440,7 +473,7 @@ class AuthService:
                 refresh_token=refresh_token,
                 token_type="bearer",
                 expires_in_minutes=_ACCESS_TOKEN_MINS,
-                role=user.role,
+                role=user._primary_role,
                 actions=actions,
                 auth_actions=RegisterAuthActionsData(
                     interactive_questions=auth_actions_row.interactive_questions,
@@ -526,8 +559,8 @@ class AuthService:
 
     async def login(
         self, request: UserLoginRequest, db: AsyncSession
-    ) -> LoginOTPResponse:
-        """Authenticate a user and dispatch a login-specific OTP.
+    ) -> LoginSuccessResponse:
+        """Authenticate a user and issue access/refresh tokens directly.
 
         Raises:
             HTTPException 401 if credentials are invalid.
@@ -551,24 +584,39 @@ class AuthService:
                 detail="Account not verified. Please complete OTP verification.",
             )
 
-        otp = generate_otp()
-        expiry = otp_expiry()
-
-        user.login_otp = otp
-        user.login_otp_expiry = expiry
-
-        logger.info("Login OTP generated for user id=%s (%s)", user.id, user.username)
-
-        # Dispatch OTP
-        result = await dispatch_login_otp(username, otp)
-        if not result.success:
-            logger.error("Login OTP dispatch failed for user id=%s: %s", user.id, result.error)
+        # Role-based login: the standard /login endpoint is for regular users
+        # (viewer/member only). Admin accounts must use the admin login endpoint.
+        if user.has_role("admin"):
+            logger.warning("Admin user attempted regular login: %s", username)
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=result.error or "Failed to deliver login verification code.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin accounts must use the admin login endpoint.",
             )
 
-        return LoginOTPResponse(userid=user.id)
+        access_token, refresh_token = await _issue_token_pair(user, db)
+
+        from app.services.user_details_service import user_details_service
+        await user_details_service.touch_last_login(user.id, db)
+
+        logger.info("Login successful for user id=%s (%s). Tokens issued.", user.id, user.username)
+
+        auth_actions_row = await _get_or_create_auth_actions(user.id, db)
+        actions = ["dashboard"] if user.has_role("admin") else []
+        return LoginSuccessResponse(
+            status="success",
+            message="Login successful.",
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in_minutes=_ACCESS_TOKEN_MINS,
+            role=user._primary_role,
+            actions=actions,
+            auth_actions=AuthActionsData(
+                payment=await _has_active_payment(user, db),
+                interactive_questions=auth_actions_row.interactive_questions,
+            ),
+        )
+
 
     # ── Verify Login ───────────────────────────────────────────────────────────
 
@@ -640,13 +688,132 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
             auth_actions=AuthActionsData(
-                payment=auth_actions_row.payment,
+                payment=await _has_active_payment(user, db),
                 interactive_questions=auth_actions_row.interactive_questions,
             ),
         )
+
+    # ── Google Sign-In ───────────────────────────────────────────────────────
+
+    async def google_sign_in(
+        self, request: GoogleAuthRequest, db: AsyncSession
+    ) -> GoogleAuthResponse:
+        """Authenticate a user from a Google Identity Services ID token.
+
+        Verifies the token against Google's keys, then resolves the account:
+          1. by Google subject id (returning users),
+          2. else by verified email → links Google to an existing local account,
+          3. else creates a fresh Google-backed account (MFA pre-completed).
+
+        Google has already verified the email, so no OTP step is required.
+
+        Raises:
+            HTTPException 401 if the Google credential is missing or invalid.
+        """
+        try:
+            claims = await verify_google_id_token(request.credential)
+        except GoogleTokenError as exc:
+            logger.warning("Rejected Google sign-in: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        google_sub = str(claims["sub"])
+        email = str(claims["email"]).lower().strip()
+        is_new_user = False
+
+        # 1. Returning Google user — look up by the stable subject id.
+        result = await db.execute(select(User).where(User.google_sub == google_sub))
+        user = result.scalar_one_or_none()
+
+        # 2. First Google sign-in for an email that already has a local account:
+        #    link the two (Google has verified the email, so this is safe).
+        if user is None:
+            user = await _get_user_by_username(db, email)
+            if user is not None:
+                user.google_sub = google_sub
+                if not user.register_mfa:
+                    # Google verified the email — treat the account as active.
+                    user.register_mfa = True
+                logger.info("Linked Google identity to existing account id=%s (%s).", user.id, email)
+
+        # 3. Brand-new user — provision a Google-backed account.
+        if user is None:
+            display_name = (claims.get("name") or "").strip() or None
+            default_role = await _get_role(db, "viewer")
+            user = User(
+                role=default_role,
+                username=email,
+                display_name=display_name,
+                password=None,
+                auth_provider="google",
+                google_sub=google_sub,
+                register_mfa=True,
+            )
+            db.add(user)
+            await db.flush()
+            await db.refresh(user)
+            await self._create_google_user_details(user, claims, db)
+            is_new_user = True
+            logger.info("Provisioned new Google account id=%s (%s).", user.id, email)
+
+        access_token, refresh_token = await _issue_token_pair(user, db)
+
+        from app.services.user_details_service import user_details_service
+        await user_details_service.touch_last_login(user.id, db)
+
+        auth_actions_row = await _get_or_create_auth_actions(user.id, db)
+        logger.info("Google sign-in successful for user id=%s. Tokens issued.", user.id)
+
+        return GoogleAuthResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in_minutes=_ACCESS_TOKEN_MINS,
+            role=user._primary_role,
+            actions=[],
+            auth_actions=AuthActionsData(
+                payment=await _has_active_payment(user, db),
+                interactive_questions=auth_actions_row.interactive_questions,
+            ),
+            is_new_user=is_new_user,
+        )
+
+    @staticmethod
+    async def _create_google_user_details(user: User, claims: dict, db: AsyncSession) -> None:
+        """Seed a user_details profile from Google claims (mobile number left blank)."""
+        from app.services.user_details_service import _generate_unique_profile_id
+
+        email = str(claims["email"]).lower().strip()
+        first_name = (claims.get("given_name") or "").strip()
+        last_name = (claims.get("family_name") or "").strip()
+        if not first_name:
+            # Fall back to the display name, then the email local-part.
+            full_name = (claims.get("name") or "").strip()
+            if full_name:
+                parts = full_name.split(None, 1)
+                first_name = parts[0]
+                last_name = last_name or (parts[1] if len(parts) > 1 else "")
+            else:
+                first_name = email.split("@", 1)[0]
+
+        profile_id = await _generate_unique_profile_id(db)
+        db.add(
+            UserDetails(
+                profile_id=profile_id,
+                user_id=user.id,
+                first_name=first_name[:100],
+                last_name=(last_name or "")[:100],
+                email=email,
+                mobile_number=None,
+            )
+        )
+        await db.flush()
+        logger.info("Seeded user_details profile_id=%s for Google user_id=%s.", profile_id, user.id)
 
     # ── Admin Login ────────────────────────────────────────────────────────────
 
@@ -670,7 +837,7 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if user.role != "admin":
+        if not user.has_role("admin"):
             logger.warning("Non-admin user attempted admin login: %s", username)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -867,7 +1034,7 @@ class AuthService:
             changed_at=user.password_changed_at,
         )
 
-        actions = ["dashboard"] if user.role == "admin" else []
+        actions = ["dashboard"] if user.has_role("admin") else []
         return ForgotPasswordResetResponse(
             status="success",
             message="Password has been reset successfully.",
@@ -875,7 +1042,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in_minutes=_ACCESS_TOKEN_MINS,
-            role=user.role,
+            role=user._primary_role,
             actions=actions,
         )
 

@@ -3,9 +3,9 @@ from datetime import date, datetime
 import uuid
 
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Table, Text, UniqueConstraint, JSON
 
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.timezone import now_ist
 
@@ -22,9 +22,6 @@ class User(Base):
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True, index=True
     )
-    role: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="user"
-    )
     username: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
     )
@@ -35,8 +32,17 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
-    password: Mapped[str] = mapped_column(
-        String(512), nullable=False
+    # Nullable: federated (e.g. Google SSO) accounts have no local password.
+    password: Mapped[str | None] = mapped_column(
+        String(512), nullable=True
+    )
+    # How the account authenticates: "local" (email + password + OTP) or "google".
+    auth_provider: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="local", server_default="local"
+    )
+    # Google's stable subject identifier ("sub" claim); set only for linked Google accounts.
+    google_sub: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True, index=True
     )
     register_otp: Mapped[int | None] = mapped_column(
         Integer, nullable=True
@@ -66,8 +72,43 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ── Role (many-to-one) ────────────────────────────────────────────────────
+    role_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False, default=3
+    )
+    role: Mapped["Role"] = relationship("Role", back_populates="users", lazy="selectin")
+
+    def has_role(self, role_name: str) -> bool:
+        """Check if the user holds a specific role (e.g. 'admin', 'member', 'viewer')."""
+        return self.role is not None and self.role.name == role_name
+
+    @property
+    def _primary_role(self) -> str:
+        """Return the role name for backward-compatible response payloads."""
+        return self.role.name if self.role else "viewer"
+
     def __repr__(self) -> str:
-        return f"<User id={self.id} username={self.username!r} role={self.role!r}>"
+        return f"<User id={self.id} username={self.username!r} role={self._primary_role!r}>"
+
+
+class Role(Base):
+    """Named role (admin, member, viewer) — one-to-many with User via role_id FK."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+
+    users: Mapped[list["User"]] = relationship(
+        "User", back_populates="role", lazy="selectin"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Role id={self.id} name={self.name!r}>"
 
 
 class UserDetails(Base):
@@ -85,13 +126,15 @@ class UserDetails(Base):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
-    mobile_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Nullable: Google SSO provides no phone number; users add it later in their profile.
+    mobile_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
     profile_status: Mapped[str] = mapped_column(String(20), nullable=False, default="Active")
     nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
     communication_preferences: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     last_login_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_ist
     )

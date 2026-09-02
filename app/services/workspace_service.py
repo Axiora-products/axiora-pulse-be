@@ -17,6 +17,7 @@ Operations:
   export_workspace_report()      → Export template-based PDF report for a workspace (owner-enforced).
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
@@ -40,10 +41,10 @@ from app.models.workspace_models import (
     WorkspaceStateResponse,
 )
 from app.services.mentor_service import mentor_service, WorkspaceMentorState
+from app.services.certificate_service import certificate_service
 from app.services.report_service import report_service
 from app.services.s3_storage_service import s3_storage_service
 from app.services.survey_service import survey_service
-from app.services.workspace_attachment_service import workspace_attachment_service
 
 logger = logging.getLogger(__name__)
 
@@ -330,20 +331,6 @@ class WorkspaceService:
                 db=db,
             )
 
-        # Auto-sync chat attachments (images, PDFs, docs) into workspace_attachments table
-        if payload.attachments:
-            for att in payload.attachments:
-                att_type = (att.type or "").lower().strip()
-                if att_type in ("image", "pdf", "doc") and att.url_or_data:
-                    await workspace_attachment_service.save_from_base64(
-                        workspace_id=workspace.id,
-                        user_id=current_user.id,
-                        filename=att.name or f"{att_type}_attachment",
-                        base64_data=att.url_or_data,
-                        mime_type=att.mime_type or "application/octet-stream",
-                        db=db,
-                    )
-
         assistant_reply = "I'm listening. Tell me more!"
         if updated_state.conversation_history:
             for msg in reversed(updated_state.conversation_history):
@@ -452,6 +439,44 @@ class WorkspaceService:
             content=file_bytes,
             media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    # ── Certificate of Completion ─────────────────────────────────────────────
+
+    async def generate_certificate(
+        self,
+        workspace_id: int,
+        current_user: User,
+        db: AsyncSession,
+    ) -> Response:
+        """Generate and download a Certificate of Completion for a validated workspace."""
+        workspace = await self._fetch_owned_workspace(workspace_id, current_user, db)
+
+        if not workspace.validation_result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Workspace {workspace_id} has not been validated yet. Please run validation first."
+            )
+
+        display_name = current_user.display_name
+        if not display_name:
+            display_name = current_user.username.split("@")[0]
+        display_name = display_name.strip().title()
+
+        file_bytes = certificate_service.generate_certificate(display_name)
+
+        logger.info(
+            "Certificate generated: workspace_id=%s user_id=%s name=%s",
+            workspace_id, current_user.id, display_name,
+        )
+
+        safe_workspace_name = re.sub(r"[^A-Za-z0-9_-]+", "", workspace.name) or f"workspace_{workspace_id}"
+        filename = f"idea_validation_certificate_{safe_workspace_name}.pdf"
+
+        return Response(
+            content=file_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     # ── Update Workspace Survey Questions (User Session) ──────────────────────
