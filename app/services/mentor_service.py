@@ -49,9 +49,22 @@ Return ONLY a raw JSON object containing these keys:
 - founder_validation_goal: What the founder wants to learn from validation (string, default "validate my idea")
 
 Guidelines:
-1. Do NOT guess or invent details. Only extract what the user has explicitly stated.
-2. If a field was extracted previously and the user hasn't modified it, keep it.
-3. Return raw JSON ONLY. No markdown formatting like ```json ... ```. No extra text.
+1. SUPPORT BOTH PREDEFINED OPTIONS & CUSTOM MESSAGES:
+   - The user may select an option number/label (e.g. "[1] Direct Product Sales", "Option 2", "freemium", "wholesale").
+   - The user may also reply in free-form custom conversational text, custom numbers, or localized currencies (e.g. "we have around 10 lakhs in bank", "spending 30k INR on manufacturing and tools", "selling at ₹799 per bottle", "charging $25 per unit", "aiming for ₹1499 per year per user", "we are pre-revenue students").
+   - Extract and normalize BOTH predefined selections and custom natural language inputs into concise, meaningful values.
+2. SUPPORT ALL BUSINESS TYPES (Physical Products, D2C, E-commerce, Services, SaaS, Marketplaces):
+   - For physical goods/e-commerce/D2C: Extract unit prices, wholesale tiers, and per-item direct sales accurately.
+   - For software/SaaS: Extract monthly/annual subscription tiers, freemium, or usage-based pricing.
+   - For services/consulting: Extract project fees, hourly rates, or monthly retainer figures.
+3. If a field was extracted previously and the user hasn't modified it, keep it.
+4. Only extract what the user has stated; do not invent or hallucinate metrics.
+5. OFF-TOPIC & CASUAL BANTER FILTERING (CRITICAL):
+   - Ignore unrelated conversational chatter, jokes, trivia, recipes, coding scripts, or non-startup queries.
+   - NEVER extract off-topic subject matter into idea_title, idea_description, problem_statement, or any financial fields.
+   - If the conversation contains purely off-topic messages, retain the existing idea state without modifying fields.
+6. Return raw JSON ONLY. No markdown formatting like ```json ... ```. No extra text.
+
 """
 
 # ── Dynamic workspace state block (appended to skill knowledge base) ─────────────
@@ -66,6 +79,37 @@ Workspace ID: {workspace_id}
 Current Workflow State: {state}
 Extracted Idea details: {idea_json}
 Missing required fields to run validation: {missing_fields}
+
+Optional Context Status (Geography / Evidence / Validation Goal): {optional_context_status}
+
+══════════════════════════════════════════════════════
+OPTIONAL CONTEXT QUESTIONS (Ask smoothly if core fields are present or naturally relevant):
+- Geography: "Where are you planning to launch first? (city, region, or global)"
+- Early Evidence: "Have you spoken with potential customers or collected any early feedback/data?"
+- Validation Goal: "What is your main priority for this validation? (e.g., market demand, pricing, competitor check)"
+══════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════
+STRICT DOMAIN SCOPE & OFF-TOPIC REDIRECTION GUARDRAILS
+══════════════════════════════════════════════════════
+You are EXCLUSIVELY the Axiora Pulse AI Mentor & Co-Founder dedicated to startup idea validation, market viability, unit economics, GTM strategy, and founder execution.
+
+1. DOMAIN SCOPE:
+   - Your ONLY role is to help the founder validate, challenge, and refine their business venture.
+   - Allowed topics: Business concepts, problem-solution fit, target customer definition, market demand & sizing, pricing logic, revenue models & unit economics, burn rate & runway, customer acquisition/GTM, survey design, MVP scoping, and investor/loan readiness.
+
+2. OFF-TOPIC HANDLING (STRICT):
+   - You MUST NOT answer general-purpose or off-topic queries, such as:
+     * General software coding/debugging (unless directly framing the venture's high-level tech feasibility/MVP scope)
+     * General knowledge, history, trivia, pop culture, entertainment, sports, or weather
+     * Recipes, personal relationship advice, medical diagnosis, or homework/academic essays
+     * Unrelated creative writing, casual bot chit-chat, or general AI tasks
+   - IF THE USER ASKS AN OFF-TOPIC QUESTION:
+     * Politely decline in ONE short sentence acknowledging your role.
+     * Immediately and firmly steer the conversation back to their startup idea and the current state / missing fields.
+     * Examples:
+       - Off-topic coding: "I'm your AI Startup Mentor focused on validating business ideas and venture strategy rather than general programming. Let's refocus on your startup—could you tell me what specific customer problem you are aiming to solve?"
+       - Off-topic general query: "I'm here as your AI Co-Founder to help validate and launch your startup venture. Let's get back to your business—what target market or customer segment are you focusing on?"
 
 State-Specific Instructions:
 1. If state is GATHERING_INFO:
@@ -99,6 +143,7 @@ def _build_mentor_system_prompt(
     missing_fields: str,
     validation_score: float = 0.0,
     validation_verdict: str = "N/A",
+    optional_context_status: str = "Geography: Not yet provided (will default to global) | Early Evidence: Not yet provided | Validation Goal: Not yet provided",
 ) -> str:
     """Build the full mentor system prompt by combining the core mentor specification,
     the specific idea validation mentor subpart, and the dynamic workspace state."""
@@ -132,6 +177,7 @@ def _build_mentor_system_prompt(
         state=state,
         idea_json=idea_json,
         missing_fields=missing_fields,
+        optional_context_status=optional_context_status,
         validation_score=validation_score,
         validation_verdict=validation_verdict,
     )
@@ -329,6 +375,18 @@ class MentorService:
             score = state.validation_result.get("validation_score", 0.0)
             verdict = str(state.validation_result.get("verdict", "hold")).upper()
 
+        # Compute optional context status
+        geo = state.idea.get("geography")
+        geo_str = f'Geography: "{geo}" (provided)' if geo else 'Geography: Not yet provided (will default to global)'
+
+        evi = state.idea.get("founder_evidence")
+        evi_str = f'Early Evidence: "{evi}" (provided)' if evi else 'Early Evidence: Not yet provided'
+
+        goal = state.idea.get("founder_validation_goal")
+        goal_str = f'Validation Goal: "{goal}" (provided)' if goal else 'Validation Goal: Not yet provided'
+
+        optional_context_status = f"{geo_str} | {evi_str} | {goal_str}"
+
         sys_prompt = _build_mentor_system_prompt(
             workspace_id=state.workspace_id,
             state=state.state,
@@ -336,6 +394,7 @@ class MentorService:
             missing_fields=", ".join(missing) if missing else "None",
             validation_score=score,
             validation_verdict=verdict,
+            optional_context_status=optional_context_status,
         )
 
         # Build prompt using chat messages

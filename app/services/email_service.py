@@ -484,7 +484,7 @@ async def send_login_otp_email(to_email: str, otp: int) -> OTPResult:
 def _build_registration_success_email(to_email: str, display_name: Optional[str] = None) -> MIMEMultipart:
     """Construct the branded 'account created' welcome email."""
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Welcome to Axiora Pulse. Your Account is Ready"
+    msg["Subject"] = "Welcome to Axiora Pulse — Your Account is Ready"
     msg["From"] = f"{_SMTP_FROM_NAME} <{_SMTP_FROM_EMAIL}>"
     msg["To"] = to_email
 
@@ -672,5 +672,259 @@ async def send_contact_email(name: str, email: str, topic: str, message: str) ->
         error = f"Unexpected error: {exc}"
         logger.error("Contact email unexpected error: %s", exc)
         return OTPResult(success=False, channel="email", error=error)
+
+
+# ── Survey Response Notification Email ─────────────────────────────────────────
+
+def _build_survey_response_notification_email(
+    to_email: str,
+    workspace_name: str,
+    workspace_id: int,
+    survey_id: int,
+    respondent_email: Optional[str],
+    questions: list[dict],
+    answers: list[dict],
+    submitted_at: Optional[datetime] = None,
+) -> MIMEMultipart:
+    """Construct the branded email notifying an Axiora member of a new survey response."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"New Survey Response Received — {workspace_name}"
+    msg["From"] = f"{_SMTP_FROM_NAME} <{_SMTP_FROM_EMAIL}>"
+    msg["To"] = to_email
+
+    when = submitted_at or datetime.now(tz=timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    local_when = when.astimezone(_EMAIL_TIMEZONE)
+    timestamp_str = local_when.strftime("%B %d, %Y at %I:%M %p %Z")
+    safe_timestamp = html.escape(timestamp_str)
+    safe_workspace = html.escape(workspace_name)
+    display_respondent = respondent_email.strip() if respondent_email else "Anonymous / Not provided"
+    safe_respondent = html.escape(display_respondent)
+
+    # Build question mapping
+    q_map: dict[Any, str] = {}
+    for q in questions:
+        if isinstance(q, dict):
+            qid = q.get("id") or q.get("question_id")
+            q_text = q.get("question") or q.get("question_text") or f"Question {qid}"
+            if qid is not None:
+                q_map[qid] = str(q_text)
+                q_map[str(qid)] = str(q_text)
+        elif hasattr(q, "id") and hasattr(q, "question"):
+            q_map[q.id] = str(q.question)
+            q_map[str(q.id)] = str(q.question)
+
+    qa_cards_html = []
+    plain_qa_lines = []
+    for idx, item in enumerate(answers, start=1):
+        qid = item.get("questionId") if isinstance(item, dict) else getattr(item, "questionId", None)
+        ans = item.get("answer") if isinstance(item, dict) else getattr(item, "answer", "")
+        q_label = q_map.get(qid, q_map.get(str(qid), f"Question #{qid}"))
+
+        if isinstance(ans, list):
+            ans_str = ", ".join(str(x) for x in ans)
+        elif ans is None or ans == "":
+            ans_str = "(No answer provided)"
+        else:
+            ans_str = str(ans)
+
+        safe_q = html.escape(str(q_label))
+        safe_a = html.escape(ans_str)
+        plain_qa_lines.append(f"• Q{idx}. {q_label}\n  Answer: {ans_str}")
+
+        qa_cards_html.append(f"""\
+            <div class="qa-box" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.02);">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding-bottom:10px;">
+                    <span style="display:inline-block;padding:2px 8px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:800;border-radius:6px;margin-right:8px;vertical-align:middle;">Q{idx}</span>
+                    <span class="text-primary" style="font-size:14px;font-weight:700;color:#1e293b;line-height:1.5;vertical-align:middle;">{safe_q}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="answer-box" style="padding:12px 16px;background:#f8fafc;border-left:4px solid #4f46e5;border-radius:0 8px 8px 0;">
+                      <span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Respondent Answer</span>
+                      <span style="display:block;font-size:14px;font-weight:600;color:#312e81;line-height:1.6;white-space:pre-wrap;">{safe_a}</span>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </div>""")
+
+    qa_content_html = "".join(qa_cards_html) if qa_cards_html else """\
+            <div class="qa-box" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;text-align:center;color:#6b7280;font-size:13px;">
+              No question answers recorded for this submission.
+            </div>"""
+
+    public_app_url = os.getenv("PUBLIC_APP_URL", "")
+    if public_app_url:
+        cta_url = f"{public_app_url.rstrip('/')}/workspace/{workspace_id}/survey"
+    else:
+        cta_url = _DASHBOARD_LOGIN_URL
+
+    plain_body = (
+        f"Hello,\n\n"
+        f"A new respondent just submitted feedback for your survey in '{workspace_name}'!\n\n"
+        f"Submission Details:\n"
+        f"• Workspace: {workspace_name}\n"
+        f"• Survey ID: #{survey_id}\n"
+        f"• Submitted At: {timestamp_str}\n"
+        f"• Respondent Email: {display_respondent}\n\n"
+        f"Submitted Answers:\n"
+        f"{chr(10).join(plain_qa_lines)}\n\n"
+        f"Ready to analyze? Log in to Axiora Pulse and run the Survey Intelligence Analysis:\n"
+        f"{cta_url}\n\n"
+        f"— The Axiora Pulse Team"
+    )
+
+    body_html = f"""\
+        <!-- Header badge & title -->
+        <tr>
+          <td align="center" style="padding-bottom:6px;">
+            <span style="display:inline-block;padding:4px 12px;background:#eef2ff;color:#4f46e5;font-size:11px;font-weight:800;border-radius:20px;text-transform:uppercase;letter-spacing:0.8px;">
+              Survey Intelligence
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding-bottom:8px;">
+            <h1 class="text-primary responsive-header" style="margin:8px 0 0 0;font-size:24px;font-weight:800;color:#111827;letter-spacing:-0.5px;">
+              New Survey Response Received
+            </h1>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding-bottom:24px;">
+            <p class="text-secondary" style="margin:0;color:#6b7280;font-size:15px;line-height:1.5;">
+              A respondent submitted new feedback for <strong style="color:#111827;">{safe_workspace}</strong>.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Responsive Metadata Grid (Landscape 3-col / Mobile stacked) -->
+        <tr>
+          <td style="padding-bottom:24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;">
+              <tr>
+                <td class="meta-grid-item" width="33%" style="vertical-align:top;padding-right:6px;">
+                  <div class="meta-box" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;min-height:72px;">
+                    <span style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Workspace</span>
+                    <span class="text-primary" style="display:block;font-size:14px;font-weight:700;color:#111827;word-break:break-word;">{safe_workspace}</span>
+                    <span style="display:inline-block;font-size:11px;font-weight:600;color:#6366f1;margin-top:3px;">Survey #{survey_id}</span>
+                  </div>
+                </td>
+                <td class="meta-grid-item" width="34%" style="vertical-align:top;padding-right:3px;padding-left:3px;">
+                  <div class="meta-box" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;min-height:72px;">
+                    <span style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Respondent</span>
+                    <span class="text-primary" style="display:block;font-size:13px;font-weight:600;color:#111827;word-break:break-all;">{safe_respondent}</span>
+                  </div>
+                </td>
+                <td class="meta-grid-item" width="33%" style="vertical-align:top;padding-left:6px;">
+                  <div class="meta-box" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;min-height:72px;">
+                    <span style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Submitted At</span>
+                    <span class="text-primary" style="display:block;font-size:13px;font-weight:600;color:#111827;">{safe_timestamp}</span>
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Section header -->
+        <tr>
+          <td style="padding-bottom:12px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <h2 class="text-primary" style="margin:0;font-size:16px;font-weight:800;color:#111827;letter-spacing:-0.3px;">
+                    Response Breakdown
+                  </h2>
+                </td>
+                <td align="right">
+                  <span style="font-size:12px;font-weight:700;color:#6366f1;background:#eef2ff;padding:3px 10px;border-radius:12px;">
+                    {len(answers)} {"Answer" if len(answers) == 1 else "Answers"}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- QA Cards list -->
+        <tr>
+          <td style="padding-bottom:24px;">
+            {qa_content_html}
+          </td>
+        </tr>
+
+        <!-- Callout Banner & Action button -->
+        <tr>
+          <td style="padding-bottom:12px;">
+            <div style="background:linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);border:1px solid #ddd6fe;border-radius:14px;padding:24px 20px;text-align:center;">
+              <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:800;color:#4338ca;">
+                Ready to Evaluate Customer Evidence?
+              </h3>
+              <p style="margin:0 0 18px 0;color:#5b21b6;font-size:13px;line-height:1.5;">
+                Synthesize this submission with your problem & solution validation hypotheses in Axiora Pulse.
+              </p>
+              {render_button("View Survey & Run Analysis", cta_url)}
+            </div>
+          </td>
+        </tr>"""
+
+    html_body = render_email_shell(
+        preheader=f"New response received for {workspace_name}.",
+        body_html=body_html,
+        max_width=680,
+    )
+
+    msg.attach(MIMEText(plain_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    return msg
+
+
+async def send_survey_response_notification_email(
+    to_email: str,
+    workspace_name: str,
+    workspace_id: int,
+    survey_id: int,
+    respondent_email: Optional[str],
+    questions: list[dict],
+    answers: list[dict],
+    submitted_at: Optional[datetime] = None,
+) -> OTPResult:
+    """Send a response submission notification email to the survey owner (async, non-blocking).
+
+    Best-effort — never raises. Returns OTPResult with success=False + error
+    string on delivery failure so callers can log or handle gracefully.
+    """
+    msg = _build_survey_response_notification_email(
+        to_email=to_email,
+        workspace_name=workspace_name,
+        workspace_id=workspace_id,
+        survey_id=survey_id,
+        respondent_email=respondent_email,
+        questions=questions,
+        answers=answers,
+        submitted_at=submitted_at,
+    )
+    try:
+        await asyncio.to_thread(_smtp_send, to_email, msg)
+        return OTPResult(success=True, channel="email")
+    except smtplib.SMTPAuthenticationError as exc:
+        error = "SMTP authentication failed — check SMTP_USER / SMTP_PASSWORD in .env"
+        logger.error("Survey response notification email auth error for %s: %s", to_email, exc)
+        return OTPResult(success=False, channel="email", error=error)
+    except smtplib.SMTPException as exc:
+        error = f"SMTP error: {exc}"
+        logger.error("Survey response notification email SMTP error for %s: %s", to_email, exc)
+        return OTPResult(success=False, channel="email", error=error)
+    except Exception as exc:
+        error = f"Unexpected error: {exc}"
+        logger.error("Survey response notification email unexpected error for %s: %s", to_email, exc)
+        return OTPResult(success=False, channel="email", error=error)
+
 
 

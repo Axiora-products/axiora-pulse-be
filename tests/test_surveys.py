@@ -314,6 +314,27 @@ async def test_get_survey_by_workspace_id_not_found(
 
 
 @pytest.mark.asyncio
+async def test_get_survey_by_workspace_id_via_workspace_subresource_alias(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_test_user(db_session, username="survey-by-ws-alias@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=user.id)
+    survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
+    authenticate_as(user)
+
+    # 1. Singular route: /api/v1/workspace/{id}/surveys
+    res_singular = await client.get(f"/api/v1/workspace/{workspace.id}/surveys")
+    assert res_singular.status_code == status.HTTP_200_OK
+    assert res_singular.json()["id"] == survey.id
+
+    # 2. Plural route: /api/v1/workspaces/{id}/surveys
+    res_plural = await client.get(f"/api/v1/workspaces/{workspace.id}/surveys")
+    assert res_plural.status_code == status.HTTP_200_OK
+    assert res_plural.json()["id"] == survey.id
+
+
+
+@pytest.mark.asyncio
 async def test_get_survey_by_workspace_id_scoped_to_current_user(
     client: AsyncClient, db_session: AsyncSession
 ):
@@ -664,3 +685,130 @@ async def test_get_survey_responses_empty_list(client: AsyncClient, db_session: 
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["total_responses"] == 0
+
+
+# ── Post-link response submission & email notification tests ───────────────────
+
+@pytest.mark.asyncio
+async def test_submit_public_survey_does_not_auto_run_analysis(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """Submitting a response must NOT automatically execute post-link analysis."""
+    user = await create_test_user(db_session, username="survey-no-auto-analyze@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=user.id)
+    survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
+
+    payload = {
+        "respondentEmail": "taker@example.com",
+        "answers": [{"questionId": 1, "answer": "25"}],
+    }
+
+    response = await client.post(f"/api/v1/surveys/public/{survey.public_token}/submit", json=payload)
+    assert response.status_code == status.HTTP_201_CREATED
+
+    # Verify survey.analysis_result remains None in DB
+    refreshed_survey = (await db_session.execute(select(Survey).where(Survey.id == survey.id))).scalar_one_or_none()
+    assert refreshed_survey is not None
+    assert refreshed_survey.analysis_result is None
+
+
+@pytest.mark.asyncio
+async def test_submit_public_survey_dispatches_email_notification(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """Submitting a response must dispatch an email notification to the survey owner."""
+    from unittest.mock import AsyncMock
+    from app.services.email_service import OTPResult
+    import asyncio
+
+    mock_send = AsyncMock(return_value=OTPResult(success=True, channel="email"))
+    monkeypatch.setattr("app.services.email_service.send_survey_response_notification_email", mock_send)
+
+    user = await create_test_user(db_session, username="survey-owner-notify@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=user.id, name="Test Product")
+    survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
+
+    payload = {
+        "respondentEmail": "customer@acme.com",
+        "answers": [
+            {"questionId": 1, "answer": "30"},
+            {"questionId": 2, "answer": "Validate"},
+        ],
+    }
+
+    response = await client.post(f"/api/v1/surveys/public/{survey.public_token}/submit", json=payload)
+    assert response.status_code == status.HTTP_201_CREATED
+
+    # Yield control briefly to allow asyncio background task to execute
+    await asyncio.sleep(0.05)
+
+    assert mock_send.called
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs["to_email"] == "survey-owner-notify@axiorapulse.com"
+    assert kwargs["workspace_name"] == "Test Product"
+    assert kwargs["workspace_id"] == workspace.id
+    assert kwargs["survey_id"] == survey.id
+    assert kwargs["respondent_email"] == "customer@acme.com"
+    assert len(kwargs["answers"]) == 2
+
+
+# ── Manual analyze endpoints tests (POST & GET) ────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_manual_post_link_analysis_requires_at_least_one_response(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_test_user(db_session, username="survey-manual-zero-resp@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=user.id)
+    survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
+    authenticate_as(user)
+
+    response = await client.post(f"/api/v1/surveys/{survey.id}/analyze")
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Minimum threshold not met" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_manual_post_link_analysis_success(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    user = await create_test_user(db_session, username="survey-manual-analyze-ok@axiorapulse.com")
+    workspace = await create_workspace(db_session, user_id=user.id)
+    survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
+
+    resp_record = PublicSurveyResponse(
+        survey_id=survey.id,
+        respondent_email="lead@company.com",
+        answers=[{"questionId": 1, "answer": "30"}, {"questionId": 2, "answer": "Validate"}],
+    )
+    db_session.add(resp_record)
+    await db_session.commit()
+
+    fake_analysis = {
+        "quality_and_fraud": {"fraud_risk_score": 0.05, "response_quality_score": 90},
+        "customer_intelligence": {"pain_points": [{"pain": "Manual tracking"}]},
+        "validation": {"evidence_strength_score": 85},
+    }
+
+    mock_run_analysis = AsyncMock(return_value=fake_analysis)
+    monkeypatch.setattr(
+        "app.agents.survey_intelligence_agent.SurveyIntelligenceAgent.run_post_link_analysis",
+        mock_run_analysis,
+    )
+
+    authenticate_as(user)
+
+    # 1. Trigger manual analysis
+    response = await client.post(f"/api/v1/surveys/{survey.id}/analyze")
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["analysis_result"] == fake_analysis
+
+    # 2. Get saved analysis
+    get_res = await client.get(f"/api/v1/surveys/{survey.id}/analysis")
+    assert get_res.status_code == status.HTTP_200_OK
+    assert get_res.json()["analysis_result"] == fake_analysis
+
