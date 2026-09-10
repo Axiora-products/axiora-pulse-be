@@ -50,10 +50,12 @@ from app.models.workspace_models import (
     WorkspaceResponse,
     WorkspaceStateResponse,
 )
+from app.models.survey_models import SurveyResponse
+from app.services.survey_service import survey_service
 from app.services.workspace_service import workspace_service
 from app.services.workspace_attachment_service import workspace_attachment_service
 
-router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
+router = APIRouter(tags=["Workspaces"])
 
 
 # ── Create Workspace ──────────────────────────────────────────────────────────
@@ -327,6 +329,32 @@ async def download_certificate(
     db: AsyncSession = Depends(get_db),
 ):
     return await workspace_service.generate_certificate(workspace_id, current_user, db)
+
+
+# ── Get Workspace Survey (Sub-resource Alias) ──────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/surveys",
+    response_model=SurveyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get survey by workspace ID",
+    description="Fetches the survey questions associated with a specific workspace.",
+)
+@router.get(
+    "/{workspace_id}/survey",
+    response_model=SurveyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get survey by workspace ID",
+    description="Fetches the survey questions associated with a specific workspace.",
+)
+@limiter.limit("60/minute")
+async def get_workspace_survey(
+    request: Request,
+    workspace_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SurveyResponse:
+    return await survey_service.get_survey_by_workspace_id(workspace_id, current_user, db)
 
 
 # ── Update Workspace Survey Questions (User Session) ─────────────────────────

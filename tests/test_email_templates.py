@@ -80,3 +80,45 @@ def test_build_registration_success_email_escapes_html_in_display_name():
     html_body = html_part.get_payload(decode=True).decode("utf-8")
     assert "<b>hax</b>" not in html_body
     assert "&lt;b&gt;hax&lt;/b&gt;" in html_body
+
+
+def test_build_survey_response_notification_email():
+    from app.services.email_service import _build_survey_response_notification_email
+
+    questions = [
+        {"id": 1, "question": "What is your main challenge?", "questionType": "text"},
+        {"id": 2, "question": "Budget range?", "questionType": "radio"},
+    ]
+    answers = [
+        {"questionId": 1, "answer": "Managing client feedback"},
+        {"questionId": 2, "answer": "$50/mo"},
+    ]
+
+    msg = _build_survey_response_notification_email(
+        to_email="owner@axiorapulse.com",
+        workspace_name="Acme Workspace",
+        workspace_id=42,
+        survey_id=7,
+        respondent_email="respondent@example.com",
+        questions=questions,
+        answers=answers,
+    )
+
+    assert "New Survey Response Received" in msg["Subject"]
+    assert "Acme Workspace" in msg["Subject"]
+    assert msg["To"] == "owner@axiorapulse.com"
+
+    parts = {
+        part.get_content_type(): part.get_payload(decode=True).decode("utf-8")
+        for part in msg.walk()
+        if part.get_content_type() in ("text/plain", "text/html")
+    }
+
+    assert "Acme Workspace" in parts["text/html"]
+    assert "respondent@example.com" in parts["text/html"]
+    assert "What is your main challenge?" in parts["text/html"]
+    assert "Managing client feedback" in parts["text/html"]
+    assert "View Survey &amp; Run Analysis" in parts["text/html"] or "View Survey & Run Analysis" in parts["text/html"]
+    assert "What is your main challenge?" in parts["text/plain"]
+    assert "Managing client feedback" in parts["text/plain"]
+

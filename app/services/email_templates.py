@@ -35,11 +35,12 @@ def _logo_header_html() -> str:
     )
 
 
-def render_email_shell(*, preheader: str, body_html: str) -> str:
+def render_email_shell(*, preheader: str, body_html: str, max_width: int = 640) -> str:
     """Wrap `body_html` in the shared Axiora Pulse card layout.
 
     `preheader` is hidden text shown as the inbox preview snippet in most
     email clients — keep it short and specific to the email's purpose.
+    `max_width` determines container width on desktop/landscape (default: 640px).
     """
     safe_preheader = html.escape(preheader)
     return f"""\
@@ -57,27 +58,35 @@ def render_email_shell(*, preheader: str, body_html: str) -> str:
     .text-primary {{ color:#f5f5f5 !important; }}
     .text-secondary {{ color:#b5b5b5 !important; }}
     .divider {{ border-color:#2a2a2a !important; }}
+    .meta-box {{ background:#242427 !important; border-color:#333338 !important; }}
+    .qa-box {{ background:#242427 !important; border-color:#333338 !important; }}
+    .answer-box {{ background:#1e1b4b !important; border-color:#6366f1 !important; color:#e0e7ff !important; }}
     .logo-light {{ display:none !important; }}
     .logo-dark {{ display:block !important; margin:0 auto !important; }}
   }}
+  @media only screen and (max-width: 640px) {{
+    .card {{ padding: 24px 16px !important; width: 100% !important; border-radius: 12px !important; }}
+    .meta-grid-item {{ display: block !important; width: 100% !important; padding: 0 0 10px 0 !important; }}
+    .responsive-header {{ font-size: 20px !important; }}
+  }}
 </style>
 </head>
-<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif;">
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">{safe_preheader}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="email-bg" style="background:#f0f2f5;padding:40px 0;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="email-bg" style="background:#f0f2f5;padding:36px 12px;">
     <tr><td align="center">
-      <table role="presentation" width="480" cellpadding="0" cellspacing="0" class="card"
-             style="background:#ffffff;border:1px solid #eeeeee;border-radius:16px;padding:48px 40px;
-                    box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="card"
+             style="max-width:{max_width}px;background:#ffffff;border:1px solid #e5e7eb;border-radius:16px;padding:40px 36px;
+                    box-shadow:0 6px 24px rgba(0,0,0,0.06);margin:0 auto;">
         <tr>
-          <td align="center" style="padding-bottom:32px;">
+          <td align="center" style="padding-bottom:28px;">
             {_logo_header_html()}
           </td>
         </tr>
         {body_html}
         <tr>
-          <td class="divider" style="text-align:center;padding-top:32px;border-top:1px solid #f0f0f0;">
-            <p class="text-secondary" style="margin:16px 0 0 0;color:#bbb;font-size:12px;line-height:1.6;">
+          <td class="divider" style="text-align:center;padding-top:28px;border-top:1px solid #f0f0f0;">
+            <p class="text-secondary" style="margin:12px 0 0 0;color:#9ca3af;font-size:12px;line-height:1.6;">
               &copy; 2025 Axiora Pulse. All rights reserved.<br>
               This is an automated message — please do not reply directly to this email.
             </p>
