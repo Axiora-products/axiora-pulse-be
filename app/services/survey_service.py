@@ -433,8 +433,29 @@ class SurveyService:
             response_record.id, survey.id, payload.respondentEmail
         )
 
-        # Automatic trigger: Auto-sync post-link response analysis in background (min 1 response)
-        asyncio.create_task(self._auto_run_post_link_analysis_bg(survey.id))
+        # Fetch workspace to get workspace name for notification email
+        workspace_result = await db.execute(select(Workspace).where(Workspace.id == survey.workspace_id))
+        workspace = workspace_result.scalar_one_or_none()
+        ws_name = workspace.name if workspace else f"Workspace #{survey.workspace_id}"
+
+        # Fetch survey owner user to get their email address
+        user_result = await db.execute(select(User).where(User.id == survey.user_id))
+        owner = user_result.scalar_one_or_none()
+
+        if owner and owner.username:
+            # Trigger owner notification email in background (without auto-running analysis)
+            asyncio.create_task(
+                self._notify_owner_new_response_bg(
+                    to_email=owner.username,
+                    workspace_name=ws_name,
+                    workspace_id=survey.workspace_id,
+                    survey_id=survey.id,
+                    respondent_email=payload.respondentEmail.strip() if payload.respondentEmail else None,
+                    questions=survey.questions or [],
+                    answers=answers_payload,
+                    submitted_at=now,
+                )
+            )
 
         return SubmitPublicSurveyResponse(
             responseId=response_record.id,
@@ -537,52 +558,45 @@ class SurveyService:
         logger.info("Post-link intelligence analysis completed and saved for survey_id=%s", survey_id)
         return analysis
 
-    async def _auto_run_post_link_analysis_bg(self, survey_id: int) -> None:
-        """Background task to auto-trigger post-link intelligence analysis on new response submission."""
+    async def _notify_owner_new_response_bg(
+        self,
+        to_email: str,
+        workspace_name: str,
+        workspace_id: int,
+        survey_id: int,
+        respondent_email: str | None,
+        questions: list[dict],
+        answers: list[dict],
+        submitted_at: datetime,
+    ) -> None:
+        """Background task to dispatch an email notification to the survey owner."""
         try:
-            from app.db.database import AsyncSessionLocal
-            async with AsyncSessionLocal() as db:
-                survey_res = await db.execute(select(Survey).where(Survey.id == survey_id))
-                survey = survey_res.scalar_one_or_none()
-                if not survey:
-                    return
-
-                resp_res = await db.execute(
-                    select(PublicSurveyResponse).where(PublicSurveyResponse.survey_id == survey_id)
+            from app.services.email_service import send_survey_response_notification_email
+            res = await send_survey_response_notification_email(
+                to_email=to_email,
+                workspace_name=workspace_name,
+                workspace_id=workspace_id,
+                survey_id=survey_id,
+                respondent_email=respondent_email,
+                questions=questions,
+                answers=answers,
+                submitted_at=submitted_at,
+            )
+            if res.success:
+                logger.info(
+                    "Survey response notification email dispatched to %s for survey_id=%s",
+                    to_email, survey_id
                 )
-                responses = resp_res.scalars().all()
-                if len(responses) < 1:
-                    return
-
-                resp_data = [
-                    {
-                        "response_id": r.id,
-                        "respondent_email": r.respondent_email,
-                        "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
-                        "answers": r.answers,
-                    }
-                    for r in responses
-                ]
-
-                from app.agents.survey_intelligence_agent import SurveyIntelligenceAgent
-                from app.llm.llm_gateway import get_llm_gateway
-
-                agent = SurveyIntelligenceAgent(get_llm_gateway())
-                analysis = await agent.run_post_link_analysis(
-                    survey_id=str(survey.id),
-                    survey_title="Customer Validation Survey",
-                    survey_objective="Validate core problem statement and customer demand",
-                    questions=survey.questions or [],
-                    responses=resp_data,
+            else:
+                logger.warning(
+                    "Failed to dispatch survey response notification email to %s for survey_id=%s: %s",
+                    to_email, survey_id, res.error
                 )
-
-                survey.analysis_result = analysis
-                survey.updated_at = datetime.now(timezone.utc)
-                await db.commit()
-                logger.info("Auto post-link analysis updated in background for survey_id=%s", survey_id)
         except Exception as e:
-            logger.warning("Background post-link analysis failed for survey_id=%s: %s", survey_id, e)
-
+            logger.warning(
+                "Unexpected error dispatching survey response notification email for survey_id=%s: %s",
+                survey_id, e
+            )
 
 
 # Singleton

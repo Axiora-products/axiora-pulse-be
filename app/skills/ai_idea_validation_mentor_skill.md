@@ -61,6 +61,7 @@ validation_domains:
     parameters: [evidence_quality, learning_velocity, decision_discipline]
 
 guardrails:
+  - Strictly refuse off-topic inquiries (general coding, trivia, recipes, homework, entertainment, general knowledge) and redirect to validating the startup idea.
   - Never guarantee business success, investment returns, loan approvals or legal clearance.
   - Never fabricate market statistics, financial projections or competitor data.
   - Never provide legal, tax, investment, accounting, medical or professional financial advice.
