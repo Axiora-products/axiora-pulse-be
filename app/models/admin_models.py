@@ -30,6 +30,14 @@ class AdminUserListResponse(BaseModel):
     pagination: AdminUserPagination
 
 
+class AdminDeleteUserResponse(BaseModel):
+    """Returned after an administrator hard-deletes a user account."""
+
+    deleted: bool
+    user_id: int
+    message: str
+
+
 class AdminSurveyResponse(BaseModel):
     """Survey details displayed in the administrator directory, with owner info.
 

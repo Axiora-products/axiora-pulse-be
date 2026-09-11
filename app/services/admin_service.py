@@ -23,6 +23,7 @@ from app.db.models import (
 from app.models.admin_models import (
     AdminDashboardGrowth,
     AdminDashboardStatsResponse,
+    AdminDeleteUserResponse,
     AdminSurveyAnswerPreviewItem,
     AdminSurveyListResponse,
     AdminSurveyPagination,
@@ -119,6 +120,42 @@ class AdminService:
         return AdminUserListResponse(
             users=users,
             pagination=AdminUserPagination(total=total, limit=limit, offset=offset),
+        )
+
+    async def delete_user(
+        self,
+        db: AsyncSession,
+        user_id: int,
+    ) -> AdminDeleteUserResponse:
+        """Hard-delete a user account and every row that references it.
+
+        The database enforces ``ON DELETE CASCADE`` on all user-owned tables
+        (profiles, workspaces, surveys, subscriptions, refresh sessions, etc.),
+        so removing the ``users`` row permanently wipes the user's data.
+        Admin accounts are protected so the platform root accounts can never
+        be deleted from the dashboard.
+        """
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with id {user_id} not found.",
+            )
+
+        if user.has_role("admin"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Admin accounts cannot be deleted.",
+            )
+
+        username = user.username
+        await db.delete(user)
+        await db.flush()
+        logger.info("Admin hard-deleted user id=%s (%s)", user_id, username)
+        return AdminDeleteUserResponse(
+            deleted=True,
+            user_id=user_id,
+            message=f"User '{username}' and all associated data have been permanently deleted.",
         )
 
     async def list_surveys(

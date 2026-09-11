@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.core.security import hash_password_async, verify_password_async
-from app.db.models import User
+from app.db.models import RefreshSession, Role, User, UserDetails
 from app.models.auth_models import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -295,6 +295,93 @@ async def test_login_rejects_unverified_account(
     )
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+async def _create_user_details(db_session: AsyncSession, user: User, *, profile_status: str) -> None:
+    details = UserDetails(
+        profile_id=f"AXR-{user.id:06d}",
+        user_id=user.id,
+        first_name="Test",
+        last_name="User",
+        email=user.username,
+        profile_status=profile_status,
+    )
+    db_session.add(details)
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_login_allows_active_and_no_profile_users(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_user(db_session, username="active-login@axiorapulse.com")
+    await _create_user_details(db_session, user, profile_status="Active")
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "Test@12345"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    # A registered user with no profile row yet is treated as active.
+    user_no_profile = await create_user(db_session, username="no-profile-login@axiorapulse.com")
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user_no_profile.username, "password": "Test@12345"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_inactive_user_with_meaningful_message(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_user(db_session, username="inactive-login@axiorapulse.com")
+    await _create_user_details(db_session, user, profile_status="Inactive")
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "Test@12345"},
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert "inactive" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_suspended_user_with_meaningful_message(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_user(db_session, username="suspended-login@axiorapulse.com")
+    await _create_user_details(db_session, user, profile_status="Suspended")
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "Test@12345"},
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert "suspended" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_login_rejects_suspended_user(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_user(db_session, username="suspended-verify-login@axiorapulse.com")
+    await _create_user_details(db_session, user, profile_status="Suspended")
+    user.login_otp = 444444
+    user.login_otp_expiry = datetime.now(tz=timezone.utc) + timedelta(minutes=5)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/auth/verify-login",
+        json={"emailOrMobile": user.username, "otp": 444444},
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert "suspended" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
