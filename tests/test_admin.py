@@ -217,6 +217,35 @@ async def test_delete_user_not_found(client: AsyncClient, db_session: AsyncSessi
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+# patch /api/v1/admin/user-details/{user_id}/status
+
+@pytest.mark.asyncio
+async def test_set_status_deactivates_user_without_profile(
+    client: AsyncClient, db_session: AsyncSession
+):
+    admin = await create_test_user(db_session, username="admin-status-profileless-admin@axiorapulse.com", role="admin")
+    target = await create_test_user(db_session, username="admin-status-profileless@axiorapulse.com")
+    authenticate_as(admin)
+
+    response = await client.patch(
+        f"/api/v1/admin/user-details/{target.id}/status",
+        json={"profile_status": "Inactive"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["user_id"] == target.id
+    assert data["profile_status"] == "Inactive"
+
+    # A skeleton profile now exists, so the deactivated user can no longer log in.
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": target.username, "password": "Test@12345"},
+    )
+    assert login_response.status_code == status.HTTP_403_FORBIDDEN
+    assert "inactive" in login_response.json()["detail"].lower()
+
+
 @pytest.mark.asyncio
 async def test_list_users_pagination_limit_and_offset(
     client: AsyncClient, db_session: AsyncSession

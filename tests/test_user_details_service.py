@@ -181,6 +181,41 @@ async def test_set_status_raises_404_when_missing(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_set_status_raises_404_when_user_missing(db_session: AsyncSession):
+    with pytest.raises(HTTPException) as exc:
+        await service.set_status_by_user_id(123456, "Inactive", db_session)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_set_status_creates_skeleton_profile_when_user_has_none(db_session: AsyncSession):
+    user = await create_user(db_session, username="no-profile-status@example.com")
+
+    resp = await service.set_status_by_user_id(user.id, "Inactive", db_session)
+
+    assert resp.user_id == user.id
+    assert resp.profile_status == "Inactive"
+    assert resp.mobile_number is None
+
+    saved = await _get_by_user_id(db_session, user.id)
+    assert saved is not None
+    assert saved.profile_status == "Inactive"
+    assert saved.email == user.username
+
+
+@pytest.mark.asyncio
+async def test_set_status_revisits_skeleton_profile_without_duplicate(db_session: AsyncSession):
+    user = await create_user(db_session, username="revisit-skeleton@example.com")
+
+    first = await service.set_status_by_user_id(user.id, "Suspended", db_session)
+    second = await service.set_status_by_user_id(user.id, "Active", db_session)
+
+    assert first.profile_id == second.profile_id
+    assert second.profile_status == "Active"
+    assert (_get_by_user_id(db_session, user.id) is not None)
+
+
+@pytest.mark.asyncio
 async def test_set_status_updates_profile(db_session: AsyncSession):
     user = await create_user(db_session, username="set-status@example.com")
     await service.upsert(_create_payload(), user, db_session)
@@ -192,10 +227,21 @@ async def test_set_status_updates_profile(db_session: AsyncSession):
 # ── touch_last_login ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_touch_last_login_noop_without_profile(db_session: AsyncSession):
-    user = await create_user(db_session, username="touch-noop@example.com")
+async def test_touch_last_login_creates_profile_and_stamps_date(db_session: AsyncSession):
+    user = await create_user(db_session, username="touch-create@example.com")
     await service.touch_last_login(user.id, db_session)
-    assert await _get_by_user_id(db_session, user.id) is None
+
+    record = await _get_by_user_id(db_session, user.id)
+    assert record is not None
+    assert record.profile_status == "Active"
+    assert record.email == user.username
+    assert record.last_login_date is not None
+
+
+@pytest.mark.asyncio
+async def test_touch_last_login_noop_for_missing_user(db_session: AsyncSession):
+    await service.touch_last_login(999999, db_session)
+    assert await _get_by_user_id(db_session, 999999) is None
 
 
 @pytest.mark.asyncio

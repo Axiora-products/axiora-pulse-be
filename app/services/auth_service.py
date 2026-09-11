@@ -436,6 +436,9 @@ class AuthService:
             access_token, refresh_token = await _issue_token_pair(user, db)
             logger.info("Login OTP verified via verify_otp for user id=%s (%s)", user.id, user.username)
 
+            from app.services.user_details_service import user_details_service
+            await user_details_service.touch_last_login(user.id, db)
+
             auth_actions_row = await _get_or_create_auth_actions(user.id, db)
             actions = ["dashboard"] if user.has_role("admin") else []
             return VerifyOTPResponse(

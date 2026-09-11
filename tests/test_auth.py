@@ -310,6 +310,13 @@ async def _create_user_details(db_session: AsyncSession, user: User, *, profile_
     await db_session.commit()
 
 
+async def _get_user_details(db_session: AsyncSession, user_id: int) -> UserDetails | None:
+    result = await db_session.execute(
+        select(UserDetails).where(UserDetails.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
 @pytest.mark.asyncio
 async def test_login_allows_active_and_no_profile_users(
     client: AsyncClient, db_session: AsyncSession
@@ -363,6 +370,26 @@ async def test_login_rejects_suspended_user_with_meaningful_message(
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
     assert "suspended" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_login_auto_creates_user_details_row(
+    client: AsyncClient, db_session: AsyncSession
+):
+    user = await create_user(db_session, username="auto-profile@axiorapulse.com")
+    assert await _get_user_details(db_session, user.id) is None
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "Test@12345"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    details = await _get_user_details(db_session, user.id)
+    assert details is not None
+    assert details.email == user.username
+    assert details.profile_status == "Active"
+    assert details.last_login_date is not None
 
 
 @pytest.mark.asyncio
