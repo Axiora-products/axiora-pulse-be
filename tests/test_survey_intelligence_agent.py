@@ -184,3 +184,93 @@ def test_extract_score_defaults_to_70_when_missing():
 def test_extract_score_defaults_to_70_on_non_numeric_value():
     agent = make_agent()
     assert agent._extract_score({"survey_quality_score": "not-a-number"}) == 70.0
+
+
+# Question deduplication tests
+
+def test_parse_output_removes_exact_duplicate_questions():
+    agent = make_agent()
+    payload = minimal_valid_survey_payload(
+        questions=[
+            {"question_text": "How many hours per week do you spend on this?", "question_type": "multiple_choice"},
+            {"question_text": "How many hours per week do you spend on this?", "question_type": "multiple_choice"},
+            {"question_text": "Who is the primary decision maker?", "question_type": "multiple_choice"},
+        ]
+    )
+    parsed = agent._parse_output(json.dumps(payload))
+    questions = parsed["questions"]
+    assert len(questions) == 2
+    assert questions[0]["question_text"] == "How many hours per week do you spend on this?"
+    assert questions[1]["question_text"] == "Who is the primary decision maker?"
+
+
+def test_parse_output_removes_near_duplicate_questions_case_and_punctuation():
+    agent = make_agent()
+    payload = minimal_valid_survey_payload(
+        questions=[
+            {"question_text": "What is your monthly budget for this solution?", "question_type": "multiple_choice"},
+            {"question_text": "  what is your monthly budget for this solution?!  ", "question_type": "multiple_choice"},
+            {"question_text": "How likely are you to switch within 3 months?", "question_type": "rating_scale"},
+        ]
+    )
+    parsed = agent._parse_output(json.dumps(payload))
+    questions = parsed["questions"]
+    assert len(questions) == 2
+    assert questions[0]["question_text"] == "What is your monthly budget for this solution?"
+    assert questions[1]["question_text"] == "How likely are you to switch within 3 months?"
+
+
+def test_parse_output_removes_token_overlap_near_duplicates():
+    agent = make_agent()
+    payload = minimal_valid_survey_payload(
+        questions=[
+            {
+                "question_text": "What tools or software do you currently use for your workflow?",
+                "question_type": "multiple_choice",
+                "target_hypothesis": "Current workaround verification",
+            },
+            {
+                "question_text": "Which tools or software do you use for your workflow today?",
+                "question_type": "multiple_choice",
+                "target_hypothesis": "Current workaround verification",
+            },
+            {
+                "question_text": "What is the biggest operational risk stopping adoption?",
+                "question_type": "checkbox",
+                "target_hypothesis": "Adoption barrier assessment",
+            },
+        ]
+    )
+    parsed = agent._parse_output(json.dumps(payload))
+    questions = parsed["questions"]
+    assert len(questions) == 2
+    assert questions[0]["question_text"] == "What tools or software do you currently use for your workflow?"
+    assert questions[1]["question_text"] == "What is the biggest operational risk stopping adoption?"
+
+
+def test_parse_output_preserves_distinct_questions():
+    agent = make_agent()
+    distinct_qs = [
+        {"question_text": "How many people in your team work on customer billing?", "question_type": "multiple_choice"},
+        {"question_text": "How often do unpaid invoices cause operational payment delays?", "question_type": "rating_scale"},
+        {"question_text": "Which accounting software does your team currently rely on?", "question_type": "multiple_choice"},
+        {"question_text": "How many hours per week do staff spend chasing invoice records?", "question_type": "multiple_choice"},
+        {"question_text": "Which features are most critical in an automated billing platform?", "question_type": "ranking"},
+        {"question_text": "What is your monthly budget range for automated payment tracking?", "question_type": "multiple_choice"},
+        {"question_text": "How likely are you to adopt a new invoicing platform in 3 months?", "question_type": "rating_scale"},
+        {"question_text": "Who makes the final purchasing decision in your organization?", "question_type": "multiple_choice"},
+        {"question_text": "What security or compliance concerns would prevent switching?", "question_type": "checkbox"},
+        {"question_text": "What single factor would trigger you to replace your current system?", "question_type": "open_ended"},
+    ]
+    payload = minimal_valid_survey_payload(questions=distinct_qs)
+    parsed = agent._parse_output(json.dumps(payload))
+    assert len(parsed["questions"]) == 10
+
+
+def test_default_survey_output_has_no_duplicates():
+    agent = make_agent()
+    default_qs = DEFAULT_SURVEY_OUTPUT["questions"]
+    assert len(default_qs) == 10
+    deduped = agent._deduplicate_questions(default_qs)
+    assert len(deduped) == len(default_qs), "DEFAULT_SURVEY_OUTPUT should have zero duplicate questions"
+

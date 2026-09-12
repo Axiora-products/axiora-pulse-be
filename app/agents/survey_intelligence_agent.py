@@ -15,6 +15,7 @@ Outputs    : survey_title, survey_objective, survey_context, validation_objectiv
              survey_quality_score, confidence, disclaimer
 """
 import logging
+import re
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
@@ -51,8 +52,8 @@ DEFAULT_SURVEY_OUTPUT = {
     },
     "survey_strategy": {
         "survey_type": "Customer Discovery",
-        "target_completion_time_minutes": 7,
-        "recommended_question_count": 12,
+        "target_completion_time_minutes": 6,
+        "recommended_question_count": 10,
         "data_collection_method": "Online self-administered questionnaire",
         "required_confidence_level": "95%",
     },
@@ -73,30 +74,30 @@ DEFAULT_SURVEY_OUTPUT = {
         "sections": [
             {
                 "section_number": 1,
-                "section_title": "Current Workflow & Background",
+                "section_title": "Team Context & Scale",
                 "questions": [
                     {
                         "question_id": "Q1",
-                        "question_text": "How do you currently address this challenge in your daily workflow?",
-                        "question_type": "open_ended",
-                        "options": [],
+                        "question_text": "How many people in your team or organization are affected by this workflow challenge?",
+                        "question_type": "multiple_choice",
+                        "options": ["Just me", "2-5 people", "6-20 people", "More than 20"],
                         "is_mandatory": True,
-                        "target_hypothesis": "Verify existence of current workarounds and pain severity.",
+                        "target_hypothesis": "Identify scale and organizational impact of the problem.",
                         "skip_logic": None,
                     }
                 ],
             },
             {
                 "section_number": 2,
-                "section_title": "Problem Severity",
+                "section_title": "Problem Frequency",
                 "questions": [
                     {
                         "question_id": "Q2",
-                        "question_text": "On a scale of 1-5, how severe is this problem when it occurs?",
+                        "question_text": "How often does this challenge occur during a typical work week?",
                         "question_type": "rating_scale",
-                        "options": ["1 - Low", "2", "3", "4", "5 - Critical"],
+                        "options": ["1 - Never", "2 - Rarely", "3 - Sometimes", "4 - Frequently", "5 - Daily"],
                         "is_mandatory": True,
-                        "target_hypothesis": "Quantify urgency and problem intensity.",
+                        "target_hypothesis": "Quantify how frequently this problem occurs.",
                         "skip_logic": None,
                     }
                 ],
@@ -115,68 +116,50 @@ DEFAULT_SURVEY_OUTPUT = {
     "testing_report": {
         "question_logic_check": "Passed",
         "flow_check": "Logical flow confirmed",
-        "estimated_completion_time_minutes": 7,
+        "estimated_completion_time_minutes": 6,
         "mobile_friendliness": "Optimized for mobile",
         "publishing_readiness": "Ready",
     },
     "target_audience_summary": "Prospective early adopters facing the core problem statement.",
     "questions": [
         {
-            "question_text": "How do you currently address this challenge in your daily workflow?",
-            "question_type": "open_ended",
-            "options": [],
-            "target_hypothesis": "Verify existence of current workarounds and pain severity.",
-        },
-        {
-            "question_text": "How many people in your team are affected by this problem?",
+            "question_text": "How many people in your team or organization are affected by this workflow challenge?",
             "question_type": "multiple_choice",
             "options": ["Just me", "2-5 people", "6-20 people", "More than 20"],
             "target_hypothesis": "Identify scale and organizational impact of the problem.",
         },
         {
-            "question_text": "On a scale of 1-5, how severe is this problem when it occurs?",
+            "question_text": "How often does this challenge occur during a typical work week?",
             "question_type": "rating_scale",
-            "options": ["1 - Low", "2", "3", "4", "5 - Critical"],
-            "target_hypothesis": "Quantify urgency and problem intensity.",
+            "options": ["1 - Never", "2 - Rarely", "3 - Sometimes", "4 - Frequently", "5 - Daily"],
+            "target_hypothesis": "Quantify how frequently this problem occurs.",
         },
         {
-            "question_text": "How many hours per week does this problem consume?",
+            "question_text": "How do you currently address this challenge in your daily workflow?",
+            "question_type": "open_ended",
+            "options": [],
+            "target_hypothesis": "Verify existence of current workarounds and friction points.",
+        },
+        {
+            "question_text": "How many hours per week does your team spend dealing with this issue?",
             "question_type": "multiple_choice",
             "options": ["Less than 1 hour", "1-3 hours", "4-7 hours", "More than 7 hours"],
-            "target_hypothesis": "Quantify time cost of the problem.",
+            "target_hypothesis": "Quantify time cost and productivity loss of the problem.",
         },
         {
-            "question_text": "What are the biggest frustrations with your current workaround?",
-            "question_type": "checkbox",
-            "options": ["Too time consuming", "Error-prone", "Poor collaboration", "High cost", "Lack of automation"],
-            "target_hypothesis": "Identify primary pain dimensions driving switching intent.",
-        },
-        {
-            "question_text": "Have you tried any existing tools to solve this problem?",
-            "question_type": "multiple_choice",
-            "options": ["Yes, currently using one", "Yes, but stopped", "No, never tried", "Currently evaluating options"],
-            "target_hypothesis": "Measure awareness of and dissatisfaction with existing solutions.",
-        },
-        {
-            "question_text": "Which features would be most important in an ideal solution?",
+            "question_text": "Which capabilities would be most critical in a dedicated solution?",
             "question_type": "ranking",
-            "options": ["Automation", "Real-time collaboration", "Integration with current tools", "Custom reporting", "Mobile access"],
+            "options": ["Process automation", "Real-time collaboration", "Integration with current tools", "Custom reporting", "Mobile access"],
             "target_hypothesis": "Identify the highest priority features for an MVP.",
         },
         {
-            "question_text": "How important is integration with your existing tools?",
-            "question_type": "rating_scale",
-            "options": ["1 - Not important", "2", "3", "4", "5 - Deal breaker"],
-            "target_hypothesis": "Validate integration as a key adoption barrier.",
-        },
-        {
-            "question_text": "What budget range per user/month would you consider for a solution?",
+            "question_text": "What budget range per user/month would you consider for a dedicated solution?",
             "question_type": "multiple_choice",
             "options": ["Free only", "$1-$10", "$11-$25", "$26-$50", "$50+"],
             "target_hypothesis": "Validate pricing model and willingness to pay.",
         },
         {
-            "question_text": "How likely are you to adopt a solution that fully addresses this in 3 months?",
+            "question_text": "How likely are you to adopt a solution that fully addresses this within 3 months?",
             "question_type": "rating_scale",
             "options": ["1 - Very unlikely", "2", "3", "4", "5 - Definitely would adopt"],
             "target_hypothesis": "Measure near-term adoption intent and purchase urgency.",
@@ -188,10 +171,16 @@ DEFAULT_SURVEY_OUTPUT = {
             "target_hypothesis": "Map the buying process and identify key decision-makers.",
         },
         {
-            "question_text": "What would make you switch from your current solution to a new one?",
+            "question_text": "What is the biggest barrier that would prevent your team from adopting a new tool?",
+            "question_type": "checkbox",
+            "options": ["Integration with current tools", "Budget constraints", "Data security concerns", "Team learning curve", "Vendor lock-in"],
+            "target_hypothesis": "Identify key adoption hurdles and friction points.",
+        },
+        {
+            "question_text": "What single improvement would make you switch from your current workaround to a new solution?",
             "question_type": "open_ended",
             "options": [],
-            "target_hypothesis": "Identify switching triggers and decision criteria.",
+            "target_hypothesis": "Identify switching triggers and primary decision criteria.",
         },
     ],
     "survey_quality_score": 75.0,
@@ -293,11 +282,20 @@ class SurveyIntelligenceAgent(BaseAgent):
         if "survey_quality_score" not in data or data["survey_quality_score"] is None:
             data["survey_quality_score"] = float(data.get("score", 70.0))
 
+        # Ensure survey_structure is a valid dict or populate default
+        if "survey_structure" not in data or not isinstance(data.get("survey_structure"), dict):
+            data["survey_structure"] = DEFAULT_SURVEY_OUTPUT["survey_structure"]
+
         # Robust questions field extraction (primary: top-level, fallback: survey_structure.sections)
-        if not isinstance(data.get("questions"), list) or not data["questions"]:
+        raw_qs = data.get("questions")
+        if not isinstance(raw_qs, list) or not raw_qs:
             extracted_qs = []
             survey_struct = data.get("survey_structure")
-            if isinstance(survey_struct, dict) and "sections" in survey_struct:
+            if (
+                isinstance(survey_struct, dict)
+                and survey_struct != DEFAULT_SURVEY_OUTPUT["survey_structure"]
+                and "sections" in survey_struct
+            ):
                 for sec in survey_struct.get("sections", []):
                     if isinstance(sec, dict) and "questions" in sec:
                         for q in sec.get("questions", []):
@@ -305,17 +303,133 @@ class SurveyIntelligenceAgent(BaseAgent):
                                 extracted_qs.append(q)
             if extracted_qs:
                 logger.info(f"[{self.agent_name}] Recovered {len(extracted_qs)} questions from survey_structure.sections.")
-                data["questions"] = extracted_qs
+                raw_qs = extracted_qs
             else:
                 logger.warning(f"[{self.agent_name}] ⚠ No AI questions found — applying static DEFAULT fallback. Check token limits or LLM errors.")
-                data["questions"] = DEFAULT_SURVEY_OUTPUT["questions"]
+                raw_qs = list(DEFAULT_SURVEY_OUTPUT["questions"])
         else:
-            logger.info(f"[{self.agent_name}] ✓ Successfully generated {len(data['questions'])} live AI questions.")
+            logger.info(f"[{self.agent_name}] Extracted {len(raw_qs)} candidate questions from LLM output.")
+
+        # Deduplicate questions (exact string match + token overlap + hypothesis redundancy)
+        deduped_qs = self._deduplicate_questions(raw_qs)
+        if not deduped_qs:
+            logger.warning(f"[{self.agent_name}] Deduplication left 0 questions — applying DEFAULT_SURVEY_OUTPUT questions.")
+            deduped_qs = list(DEFAULT_SURVEY_OUTPUT["questions"])
+
+        data["questions"] = deduped_qs
+        logger.info(f"[{self.agent_name}] ✓ Final clean question count: {len(deduped_qs)}.")
 
         if val_result.warnings:
             logger.info(f"[{self.agent_name}] Validation warnings: {val_result.warnings}")
 
         return data
+
+    # ── Question Deduplication Engine ──────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_question_text(text: str) -> str:
+        """Normalize question string for comparison."""
+        if not text:
+            return ""
+        cleaned = re.sub(r"[^\w\s]", " ", str(text).lower())
+        return " ".join(cleaned.split())
+
+    @classmethod
+    def _question_tokens(cls, text: str) -> set[str]:
+        """Extract significant word stems/tokens excluding common grammatical words."""
+        stopwords = {
+            "the", "and", "for", "that", "this", "with", "you", "your", "are", "have",
+            "has", "what", "how", "which", "when", "where", "who", "why", "does", "did",
+            "would", "could", "will", "from", "been", "being", "most", "more", "like",
+            "any", "all", "our", "their", "into", "onto", "about", "such", "than", "select",
+            "apply", "currently", "past", "month", "months", "year", "years", "today"
+        }
+        words = cls._normalize_question_text(text).split()
+        tokens = set()
+        for w in words:
+            if len(w) > 2 and w not in stopwords:
+                for suffix in ("ing", "ed", "ers", "er", "es", "s"):
+                    if len(w) > len(suffix) + 3 and w.endswith(suffix):
+                        w = w[:-len(suffix)]
+                        break
+                tokens.add(w)
+        return tokens
+
+    @classmethod
+    def _is_duplicate_question(
+        cls,
+        candidate_q: dict[str, Any],
+        accepted_questions: list[dict[str, Any]],
+    ) -> bool:
+        """
+        Evaluates whether candidate_q is an exact duplicate or near-duplicate
+        of any question already accepted.
+        """
+        c_text = candidate_q.get("question_text") or candidate_q.get("question") or ""
+        norm_c = cls._normalize_question_text(c_text)
+        if not norm_c:
+            return True
+
+        c_tokens = cls._question_tokens(c_text)
+        c_hyp = cls._normalize_question_text(candidate_q.get("target_hypothesis", ""))
+        c_hyp_tokens = cls._question_tokens(c_hyp)
+
+        for accepted in accepted_questions:
+            a_text = accepted.get("question_text") or accepted.get("question") or ""
+            norm_a = cls._normalize_question_text(a_text)
+
+            # 1. Exact normalized match
+            if norm_c == norm_a:
+                return True
+
+            # 2. Token Jaccard similarity >= 0.70
+            a_tokens = cls._question_tokens(a_text)
+            if c_tokens and a_tokens:
+                intersection = len(c_tokens & a_tokens)
+                union = len(c_tokens | a_tokens)
+                jaccard = intersection / union if union > 0 else 0.0
+                if jaccard >= 0.70:
+                    return True
+
+                # 3. Moderate token overlap (>= 0.45) with high target hypothesis overlap (>= 0.50)
+                if jaccard >= 0.45 and c_hyp_tokens:
+                    a_hyp = cls._normalize_question_text(accepted.get("target_hypothesis", ""))
+                    a_hyp_tokens = cls._question_tokens(a_hyp)
+                    hyp_intersect = len(c_hyp_tokens & a_hyp_tokens)
+                    hyp_union = len(c_hyp_tokens | a_hyp_tokens)
+                    hyp_jaccard = hyp_intersect / hyp_union if hyp_union > 0 else 0.0
+                    if hyp_jaccard >= 0.50:
+                        return True
+
+        return False
+
+    def _deduplicate_questions(self, raw_questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Deduplicates a list of question dicts, preserving the order of distinct items.
+        """
+        if not isinstance(raw_questions, list):
+            return []
+
+        accepted: list[dict[str, Any]] = []
+        dropped_count = 0
+
+        for q in raw_questions:
+            if not isinstance(q, dict):
+                continue
+            if self._is_duplicate_question(q, accepted):
+                dropped_count += 1
+                q_text = q.get("question_text") or q.get("question") or ""
+                logger.info(f"[{self.agent_name}] Deduplication dropped redundant question: '{q_text}'")
+            else:
+                accepted.append(dict(q))
+
+        if dropped_count > 0:
+            logger.info(
+                f"[{self.agent_name}] Deduplication removed {dropped_count} redundant question(s). "
+                f"Clean questions remaining: {len(accepted)}"
+            )
+
+        return accepted
 
     # ── Score Extractor ────────────────────────────────────────────────────────
 
