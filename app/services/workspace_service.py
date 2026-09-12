@@ -76,7 +76,8 @@ class WorkspaceService:
                 "problem_statement": None,
                 "industry": "general",
                 "founder_validation_goal": "validate my idea",
-                "geography": "global"
+                "geography": "global",
+                "business_stage": "idea",
             },
             conversation_history=[],
             validation_result=None,
@@ -303,6 +304,13 @@ class WorkspaceService:
             validation_result=workspace.validation_result
         )
 
+        # Inject founder name into idea dict so mentor can use it for personalisation
+        if "founder_name" not in ws_state.idea or not ws_state.idea.get("founder_name"):
+            if current_user.display_name:
+                ws_state.idea["founder_name"] = current_user.display_name.strip().split()[0].title()
+            elif current_user.username:
+                ws_state.idea["founder_name"] = current_user.username.split("@")[0].title()
+
         updated_state = await mentor_service.process_message(
             state=ws_state,
             user_message=payload.message,
@@ -379,13 +387,24 @@ class WorkspaceService:
             "problem_statement": None,
             "industry": "general",
             "founder_validation_goal": "validate my idea",
-            "geography": "global"
+            "geography": "global",
+            "business_stage": "idea",
         }
 
+        # Personalise greeting with user's first name when available
+        user_first_name = ""
+        if current_user.display_name:
+            user_first_name = current_user.display_name.strip().split()[0].title()
+        elif current_user.username:
+            user_first_name = current_user.username.split("@")[0].title()
+
+        name_greeting = f"Hello {user_first_name}!" if user_first_name else "Hello!"
         initial_greeting = (
-            "Hello! I'm your AI Mentor at Axiora Pulse. "
-            "Tell me about your startup idea and the problem you're solving — "
-            "and together we'll validate its potential!"
+            f"{name_greeting} I'm Arya, your AI Mentor at Axiora Pulse. "
+            "I'm here to help you validate your idea, challenge the right assumptions, and build a clear path forward — "
+            "without wasting time or capital. "
+            "Tell me about your startup idea and the problem you're solving, "
+            "and let's work through this together."
         )
 
         workspace.state = "GATHERING_INFO"
