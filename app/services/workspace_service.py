@@ -482,7 +482,15 @@ class WorkspaceService:
             display_name = current_user.username.split("@")[0]
         display_name = display_name.strip().title()
 
-        file_bytes = certificate_service.generate_certificate(display_name)
+        issue_datetime = self._certificate_issue_datetime(workspace)
+        certificate_id = f"Pulse/{issue_datetime:%Y/%m}/{workspace.id:04d}"
+        issue_date = issue_datetime.strftime("%d %B %Y")
+
+        file_bytes = certificate_service.generate_certificate(
+            display_name,
+            certificate_id=certificate_id,
+            issue_date=issue_date,
+        )
 
         logger.info(
             "Certificate generated: workspace_id=%s user_id=%s name=%s",
@@ -497,6 +505,25 @@ class WorkspaceService:
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    def _certificate_issue_datetime(self, workspace: Workspace) -> datetime:
+        validation_result = workspace.validation_result or {}
+        created_at = validation_result.get("created_at")
+
+        if isinstance(created_at, datetime):
+            return created_at
+
+        if isinstance(created_at, str):
+            try:
+                return datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except ValueError:
+                logger.warning(
+                    "Unable to parse validation created_at for workspace_id=%s: %s",
+                    workspace.id,
+                    created_at,
+                )
+
+        return workspace.updated_at or datetime.now(timezone.utc)
 
     # ── Update Workspace Survey Questions (User Session) ──────────────────────
 

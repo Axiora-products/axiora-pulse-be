@@ -1,4 +1,5 @@
 import pytest
+import fitz
 from fastapi import status
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -105,12 +106,38 @@ async def test_generate_certificate_returns_valid_pdf():
     assert len(pdf_bytes) > 0
     assert pdf_bytes[:5] == b"%PDF-"
 
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        assert doc[0].rect.width > doc[0].rect.height
+    finally:
+        doc.close()
+
 
 @pytest.mark.asyncio
 async def test_generate_certificate_with_simple_name():
     cert_service = CertificateService()
     pdf_bytes = cert_service.generate_certificate("Alice")
     assert pdf_bytes[:5] == b"%PDF-"
+
+
+@pytest.mark.asyncio
+async def test_generate_certificate_embeds_certificate_metadata():
+    cert_service = CertificateService()
+    pdf_bytes = cert_service.generate_certificate(
+        "Alice",
+        certificate_id="Pulse/2026/09/0001",
+        issue_date="01 September 2026",
+    )
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        text = doc[0].get_text()
+    finally:
+        doc.close()
+
+    assert "Alice" in text
+    assert "Pulse/2026/09/0001" in text
+    assert "01 September 2026" in text
 
 
 # ── API tests: GET /{workspace_id}/certificate ──────────────────────────────
