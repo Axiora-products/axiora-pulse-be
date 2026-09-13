@@ -24,7 +24,8 @@ class WorkspaceMentorState(BaseModel):
         "problem_statement": None,
         "industry": "general",
         "founder_validation_goal": "validate my idea",
-        "geography": "global"
+        "geography": "global",
+        "business_stage": "idea",  # pre_idea | idea | mvp | revenue | scaling | existing_business
     })
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
     validation_result: Optional[Dict[str, Any]] = None
@@ -47,6 +48,7 @@ Return ONLY a raw JSON object containing these keys:
 - industry: Sector or industry (string, default "general")
 - geography: Target market region (string, default "global")
 - founder_validation_goal: What the founder wants to learn from validation (string, default "validate my idea")
+- business_stage: Current stage of the business. One of: "pre_idea" | "idea" | "mvp" | "revenue" | "scaling" | "existing_business". Infer from context. Default "idea".
 
 Guidelines:
 1. SUPPORT BOTH PREDEFINED OPTIONS & CUSTOM MESSAGES:
@@ -81,6 +83,9 @@ Extracted Idea details: {idea_json}
 Missing required fields to run validation: {missing_fields}
 
 Optional Context Status (Geography / Evidence / Validation Goal): {optional_context_status}
+Founder Name: {founder_name}
+Business Stage: {business_stage}
+Emotional Signal (Last Message): {emotional_signal}
 
 ══════════════════════════════════════════════════════
 OPTIONAL CONTEXT QUESTIONS (Ask smoothly if core fields are present or naturally relevant):
@@ -144,6 +149,9 @@ def _build_mentor_system_prompt(
     validation_score: float = 0.0,
     validation_verdict: str = "N/A",
     optional_context_status: str = "Geography: Not yet provided (will default to global) | Early Evidence: Not yet provided | Validation Goal: Not yet provided",
+    founder_name: str = "Founder",
+    business_stage: str = "idea",
+    emotional_signal: str = "neutral",
 ) -> str:
     """Build the full mentor system prompt by combining the core mentor specification,
     the specific idea validation mentor subpart, and the dynamic workspace state."""
@@ -180,6 +188,9 @@ def _build_mentor_system_prompt(
         optional_context_status=optional_context_status,
         validation_score=validation_score,
         validation_verdict=validation_verdict,
+        founder_name=founder_name,
+        business_stage=business_stage,
+        emotional_signal=emotional_signal,
     )
 
     return knowledge_base + workspace_block
@@ -387,6 +398,26 @@ class MentorService:
 
         optional_context_status = f"{geo_str} | {evi_str} | {goal_str}"
 
+        # Derive founder name from idea context (will be overridden by CODE-C caller)
+        founder_name = state.idea.get("founder_name", "Founder")
+
+        # Derive business stage
+        business_stage = state.idea.get("business_stage", "idea")
+
+        # Lightweight emotional signal — derived from last user message length and keywords
+        emotional_signal = "neutral"
+        last_user_msgs = [m for m in state.conversation_history[-3:] if m.get("role") == "user"]
+        if last_user_msgs:
+            last_text = last_user_msgs[-1].get("content", "").lower()
+            if any(w in last_text for w in ["scared", "worried", "stressed", "struggling", "fail", "confused", "lost", "help", "don't know", "overwhelmed"]):
+                emotional_signal = "stressed_or_fearful"
+            elif any(w in last_text for w in ["not sure", "maybe", "i think", "perhaps", "could be", "unsure"]):
+                emotional_signal = "uncertain_or_under_confident"
+            elif any(w in last_text for w in ["excited", "amazing", "love", "great", "definitely", "sure", "100%", "guaranteed"]):
+                emotional_signal = "excited_or_overconfident"
+            elif any(w in last_text for w in ["let's go", "ready", "move fast", "quickly", "asap", "now"]):
+                emotional_signal = "aggressive_or_fast_moving"
+
         sys_prompt = _build_mentor_system_prompt(
             workspace_id=state.workspace_id,
             state=state.state,
@@ -395,6 +426,9 @@ class MentorService:
             validation_score=score,
             validation_verdict=verdict,
             optional_context_status=optional_context_status,
+            founder_name=founder_name,
+            business_stage=business_stage,
+            emotional_signal=emotional_signal,
         )
 
         # Build prompt using chat messages
