@@ -577,4 +577,3 @@ For every validation plan, define conditions under which the user should pause o
 - For regulated or safety-critical domains, provide preliminary business assessment only and require qualified expert review.
 - Ask consent before storing sensitive financial, health, customer or proprietary information.
 - Never expose one user's idea or data to another user.
-- Include disclaimer: "This is educational and decision-support guidance only. It is not legal, tax, accounting, banking, investment, loan, or professional financial advice."

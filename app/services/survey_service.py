@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -69,8 +70,19 @@ class SurveyService:
         }
 
         mapped_questions = []
-        for idx, q in enumerate(agent_questions, start=1):
+        seen_normalized_texts = set()
+        idx = 1
+        for q in agent_questions:
             q_text = q.get("question_text") or q.get("question") or f"Question {idx}"
+            norm_key = " ".join(re.sub(r"[^\w\s]", " ", str(q_text).lower()).split())
+            if norm_key in seen_normalized_texts:
+                logger.info(
+                    "Skipping duplicate question during survey sync for workspace_id=%s: '%s'",
+                    workspace_id, q_text,
+                )
+                continue
+            seen_normalized_texts.add(norm_key)
+
             raw_type = str(q.get("question_type") or q.get("questionType") or "text").lower()
             q_type = type_mapping.get(raw_type, "text")
             options = q.get("options") or []
@@ -85,6 +97,7 @@ class SurveyService:
                     options=options,
                 )
             )
+            idx += 1
 
         req = SaveAllSurveyQuestionsRequest(
             userId=user_id,

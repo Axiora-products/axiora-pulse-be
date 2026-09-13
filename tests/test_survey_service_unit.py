@@ -203,6 +203,40 @@ async def test_sync_replaces_existing_survey(db_session: AsyncSession):
     assert surveys[0].questions[0]["questionType"] == "checkbox"
 
 
+@pytest.mark.asyncio
+async def test_sync_filters_duplicate_questions(db_session: AsyncSession):
+    user = await create_user(db_session, username="sync-dedup@example.com")
+    workspace = await create_workspace(db_session, user_id=user.id)
+
+    payload = {
+        "agent_results": {
+            "survey_intelligence_agent": {
+                "data": {
+                    "questions": [
+                        {"question_text": "What is your monthly budget?", "question_type": "multiple_choice", "options": ["$10", "$50"]},
+                        {"question_text": "What is your monthly budget?", "question_type": "multiple_choice", "options": ["$10", "$50"]},
+                        {"question_text": "  what is your monthly budget?!  ", "question_type": "multiple_choice", "options": ["$10", "$50"]},
+                        {"question_text": "Who makes the buying decision?", "question_type": "multiple_choice", "options": ["Me", "Boss"]},
+                    ]
+                }
+            }
+        }
+    }
+
+    await service.sync_survey_from_validation_result(user.id, workspace.id, payload, db_session)
+
+    result = await db_session.execute(
+        select(Survey).where(Survey.workspace_id == workspace.id, Survey.user_id == user.id)
+    )
+    survey = result.scalar_one_or_none()
+    assert survey is not None
+    assert len(survey.questions) == 2
+    assert survey.questions[0]["id"] == 1
+    assert survey.questions[0]["question"] == "What is your monthly budget?"
+    assert survey.questions[1]["id"] == 2
+    assert survey.questions[1]["question"] == "Who makes the buying decision?"
+
+
 # ── Instance sanity ─────────────────────────────────────────────────────────
 
 def test_module_instance():
