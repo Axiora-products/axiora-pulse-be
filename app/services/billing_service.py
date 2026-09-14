@@ -32,6 +32,10 @@ _NON_TERMINAL = {"created", "authenticated", "active", "pending", "halted"}
 # subscription counts as paid — 'authenticated' means checkout was authorized but
 # the charge hasn't been confirmed, so a mid-payment user is still routed to pay.
 _ENTITLED = {"active"}
+# Terminal / churned statuses — the paid relationship has ended (payment retries
+# exhausted, cancelled, run to completion, or expired). When a user's last entitled
+# subscription reaches one of these, their 'member' role is revoked to 'viewer'.
+_CHURNED = {"halted", "cancelled", "completed", "expired"}
 
 # Feature flag — when false, the payment gate is bypassed and every user is treated
 # as entitled. Intended for LOCAL DEVELOPMENT so developers can reach subscription-
@@ -264,15 +268,63 @@ class BillingService:
         await db.flush()
         logger.info("Subscription %s → status=%s", rzp_sub_id, subscription.status)
 
-        # Upgrade user role to "member" when subscription becomes entitled
-        if subscription.status in _ENTITLED and subscription.user_id:
-            user = (await db.execute(select(User).where(User.id == subscription.user_id))).scalar_one_or_none()
-            if user and (not user.has_role("admin")):
-                member_role = (await db.execute(select(Role).where(Role.name == "member"))).scalar_one_or_none()
-                if member_role and (not user.has_role("member")):
+        # Keep the user's role in sync with their subscription entitlement.
+        if subscription.user_id:
+            await self._sync_role_to_entitlement(subscription, db)
+
+    async def _sync_role_to_entitlement(self, subscription: Subscription, db: AsyncSession) -> None:
+        """Align the subscriber's role with their live entitlement.
+
+        - Subscription becomes ``active``  → upgrade viewer → member.
+        - Subscription churns (halted/cancelled/completed/expired) → downgrade
+          member → viewer, but ONLY if the user has no other still-active
+          subscription. Admins are never touched.
+        """
+        user = (
+            await db.execute(select(User).where(User.id == subscription.user_id))
+        ).scalar_one_or_none()
+        if user is None or user.has_role("admin"):
+            return
+
+        status = subscription.status
+
+        if status in _ENTITLED:
+            if not user.has_role("member"):
+                member_role = (
+                    await db.execute(select(Role).where(Role.name == "member"))
+                ).scalar_one_or_none()
+                if member_role:
                     user.role = member_role
                     await db.flush()
-                    logger.info("User %s role upgraded to member (subscription %s)", user.id, rzp_sub_id)
+                    logger.info(
+                        "User %s role upgraded to member (subscription %s)",
+                        user.id, subscription.razorpay_subscription_id,
+                    )
+            return
+
+        if status in _CHURNED and user.has_role("member"):
+            # Don't revoke if another subscription still grants entitlement.
+            other_active = (
+                await db.execute(
+                    select(Subscription.id).where(
+                        Subscription.user_id == user.id,
+                        Subscription.status.in_(_ENTITLED),
+                        Subscription.id != subscription.id,
+                    )
+                )
+            ).first()
+            if other_active is not None:
+                return
+            viewer_role = (
+                await db.execute(select(Role).where(Role.name == "viewer"))
+            ).scalar_one_or_none()
+            if viewer_role:
+                user.role = viewer_role
+                await db.flush()
+                logger.info(
+                    "User %s role downgraded to viewer (subscription %s churned: %s)",
+                    user.id, subscription.razorpay_subscription_id, status,
+                )
 
     async def _record_payment(self, entity: dict, db: AsyncSession) -> None:
         rzp_payment_id = entity.get("id")

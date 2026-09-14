@@ -404,6 +404,63 @@ async def test_apply_subscription_update_skips_missing_id(db_session: AsyncSessi
     await billing_service._apply_subscription_update({"status": "active"}, db_session)
 
 
+# ── BillingService: role sync on entitlement (churn downgrade) ──────────────────
+
+@pytest.mark.asyncio
+async def test_webhook_upgrades_viewer_to_member_on_active(db_session: AsyncSession):
+    user = await _create_user(db_session, username="up@axiorapulse.com", role_name="viewer")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, user, plan, status="created", rzp_sub_id="sub_up")
+    await db_session.commit()
+
+    await billing_service._apply_subscription_update({"id": "sub_up", "status": "active"}, db_session)
+
+    await db_session.refresh(user)
+    assert user.has_role("member")
+
+
+@pytest.mark.asyncio
+async def test_webhook_downgrades_member_to_viewer_on_churn(db_session: AsyncSession):
+    user = await _create_user(db_session, username="churn@axiorapulse.com", role_name="member")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, user, plan, status="active", rzp_sub_id="sub_churn")
+    await db_session.commit()
+
+    # Subscription is cancelled → member should be revoked to viewer.
+    await billing_service._apply_subscription_update({"id": "sub_churn", "status": "cancelled"}, db_session)
+
+    await db_session.refresh(user)
+    assert user.has_role("viewer")
+
+
+@pytest.mark.asyncio
+async def test_webhook_keeps_member_when_another_subscription_still_active(db_session: AsyncSession):
+    user = await _create_user(db_session, username="multi@axiorapulse.com", role_name="member")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, user, plan, status="active", rzp_sub_id="sub_x")
+    await _create_subscription(db_session, user, plan, status="active", rzp_sub_id="sub_y")
+    await db_session.commit()
+
+    # sub_x churns, but sub_y is still active → keep member.
+    await billing_service._apply_subscription_update({"id": "sub_x", "status": "halted"}, db_session)
+
+    await db_session.refresh(user)
+    assert user.has_role("member")
+
+
+@pytest.mark.asyncio
+async def test_webhook_never_downgrades_admin(db_session: AsyncSession):
+    admin = await _create_user(db_session, username="adminchurn@axiorapulse.com", role_name="admin")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, admin, plan, status="active", rzp_sub_id="sub_admin")
+    await db_session.commit()
+
+    await billing_service._apply_subscription_update({"id": "sub_admin", "status": "cancelled"}, db_session)
+
+    await db_session.refresh(admin)
+    assert admin.has_role("admin")
+
+
 # ── RazorpayService ────────────────────────────────────────────────────────────
 
 def test_razorpay_key_id_and_total_count():
