@@ -591,6 +591,16 @@ class Plan(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     features: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     tier: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # gating rank: free=0, pro=1, ...
+
+    # ── Per-plan quota limits (Phase-1 entitlements) ──────────────────────────
+    # Enforced by the billing/entitlement layer. For the integer caps, NULL means
+    # "unlimited / not enforced". Storage, stage re-runs and analytics tiers are
+    # intentionally not modelled yet — added when those features are scoped.
+    workspace_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    survey_response_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    regeneration_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    export_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
     popular: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")  # highlight in UI
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
