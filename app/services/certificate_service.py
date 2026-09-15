@@ -55,8 +55,14 @@ class CertificateService:
                 rect.width * _NAME_MAX_WIDTH_RATIO,
             )
             text_width = font_obj.text_length(display_name, fontsize=font_size)
-            x = (rect.width - text_width) / 2
-            y = rect.height * 0.485
+            if page.rotation:
+                x = rect.width * 0.354
+                y = (rect.width + text_width) / 2 + 3
+                text_rotation = page.rotation
+            else:
+                x = (rect.width - text_width) / 2
+                y = rect.height * 0.485
+                text_rotation = 0
 
             page.insert_text(
                 fitz.Point(x, y),
@@ -65,28 +71,31 @@ class CertificateService:
                 fontfile=fontfile,
                 fontsize=font_size,
                 color=_INK,
+                rotate=text_rotation,
             )
 
             if certificate_id:
                 page.insert_text(
                     fitz.Point(
-                        rect.width * 0.125,
-                        rect.height * 0.882,
+                        rect.width * 0.622,
+                        rect.width * 0.867,
                     ),
                     certificate_id,
                     fontsize=_TEXT_FONT_SIZE,
                     color=_BLACK,
+                    rotate=page.rotation,
                 )
 
             if issue_date:
                 page.insert_text(
                     fitz.Point(
-                        rect.width * 0.125,
-                        rect.height * 0.902,
+                        rect.width * 0.638,
+                        rect.width * 0.867,
                     ),
                     issue_date,
                     fontsize=_TEXT_FONT_SIZE,
                     color=_BLACK,
+                    rotate=page.rotation,
                 )
 
             output_bytes = doc.tobytes(deflate=True, garbage=4)
