@@ -9,15 +9,15 @@ one-line `add_column`s in a later migration once those features are scoped.
 Convention for the integer caps: NULL means "unlimited / not enforced" (e.g. admin
 or a future unlimited tier). Concrete tier values are back-filled below.
 
-Revision ID: 0031
-Revises: 0030
+Revision ID: 0032
+Revises: 0031
 Create Date: 2026-09-14
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0031"
-down_revision = "0030"
+revision = "0032"
+down_revision = "0031"
 branch_labels = None
 depends_on = None
 
