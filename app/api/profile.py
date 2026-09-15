@@ -95,7 +95,7 @@ async def update_current_user_profile(
             registered_at = to_ist(current_user.created_at)
             name_parts = (current_user.display_name or current_user.username.split("@", 1)[0]).split(" ", 1)
             first_name = name_parts[0] or "User"
-            last_name = name_parts[1] if len(name_parts) > 1 else "Profile"
+            last_name = name_parts[1] if len(name_parts) > 1 else ""
 
             details = UserDetails(
                 profile_id=profile_id,
@@ -103,7 +103,7 @@ async def update_current_user_profile(
                 first_name=first_name,
                 last_name=last_name,
                 email=current_user.username,
-                mobile_number="9999999999",
+                mobile_number="XXXXXXXXXX",
                 avatar_url=payload.avatarUrl,
                 created_at=registered_at,
                 updated_at=registered_at,
@@ -163,7 +163,7 @@ async def upload_user_avatar(
         registered_at = to_ist(current_user.created_at)
         name_parts = (current_user.display_name or current_user.username.split("@", 1)[0]).split(" ", 1)
         first_name = name_parts[0] or "User"
-        last_name = name_parts[1] if len(name_parts) > 1 else "Profile"
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
 
         details = UserDetails(
             profile_id=profile_id,
@@ -171,7 +171,7 @@ async def upload_user_avatar(
             first_name=first_name,
             last_name=last_name,
             email=current_user.username,
-            mobile_number="9999999999",
+            mobile_number="XXXXXXXXXX",
             avatar_url=file_url,
             created_at=registered_at,
             updated_at=registered_at,
