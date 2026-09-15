@@ -22,7 +22,7 @@ import logging
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_export_enabled
 from app.core.limiter import limiter
 from app.db.database import get_db
 from app.db.models import User
@@ -207,7 +207,7 @@ async def export_survey(
     request: Request,
     survey_id: int,
     format: str = Query("json", description="Export format: json or markdown"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_export_enabled),
     db: AsyncSession = Depends(get_db),
 ) -> ExportSurveyResponse:
     return await survey_service.export_survey(survey_id, format, current_user, db)
