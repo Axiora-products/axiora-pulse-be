@@ -90,12 +90,16 @@ async def create_survey_response(
     db_session: AsyncSession,
     *,
     survey_id: int,
-    respondent_email: str | None = None,
+    respondent_name: str = "Test Respondent",
+    respondent_email: str = "respondent@example.com",
+    contact_number: str | None = None,
     answers: list[dict] | None = None,
 ) -> PublicSurveyResponse:
     response = PublicSurveyResponse(
         survey_id=survey_id,
+        respondent_name=respondent_name,
         respondent_email=respondent_email,
+        contact_number=contact_number,
         answers=answers if answers is not None else [{"questionId": 1, "answer": "Yes"}],
     )
     db_session.add(response)
@@ -151,6 +155,99 @@ async def test_list_users_returns_paginated_directory_with_workspace_counts(
     assert users_by_id[user_a.id]["workspace_count"] == 2
     assert users_by_id[user_b.id]["workspace_count"] == 0
     assert data["pagination"]["total"] == len(data["users"])
+
+
+# delete /api/v1/admin/users/{user_id}
+
+@pytest.mark.asyncio
+async def test_delete_user_requires_admin(client: AsyncClient, db_session: AsyncSession):
+    user = await create_test_user(db_session, username="admin-delete-nonadmin@axiorapulse.com")
+    target = await create_test_user(db_session, username="admin-delete-target@axiorapulse.com")
+    authenticate_as(user)
+
+    response = await client.delete(f"/api/v1/admin/users/{target.id}")
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_delete_user_permanently_removes_user_and_cascades_data(
+    client: AsyncClient, db_session: AsyncSession
+):
+    admin = await create_test_user(db_session, username="admin-delete-admin@axiorapulse.com", role="admin")
+    target = await create_test_user(db_session, username="admin-delete-victim@axiorapulse.com")
+    await create_workspace(db_session, user_id=target.id, name="To Be Wiped")
+    authenticate_as(admin)
+
+    response = await client.delete(f"/api/v1/admin/users/{target.id}")
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["deleted"] is True
+    assert data["user_id"] == target.id
+    assert "permanently deleted" in data["message"].lower()
+
+    remaining = (
+        await db_session.execute(select(User).where(User.id == target.id))
+    ).scalar_one_or_none()
+    assert remaining is None
+
+    ws_remaining = (
+        await db_session.execute(select(Workspace).where(Workspace.user_id == target.id))
+    ).scalars().all()
+    assert ws_remaining == []
+
+
+@pytest.mark.asyncio
+async def test_delete_user_rejects_admin_account(client: AsyncClient, db_session: AsyncSession):
+    admin = await create_test_user(db_session, username="admin-delete-admin-guard@axiorapulse.com", role="admin")
+    other_admin = await create_test_user(
+        db_session, username="admin-delete-other-admin@axiorapulse.com", role="admin"
+    )
+    authenticate_as(admin)
+
+    response = await client.delete(f"/api/v1/admin/users/{other_admin.id}")
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_delete_user_not_found(client: AsyncClient, db_session: AsyncSession):
+    admin = await create_test_user(db_session, username="admin-delete-404-admin@axiorapulse.com", role="admin")
+    authenticate_as(admin)
+
+    response = await client.delete("/api/v1/admin/users/999999")
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+# patch /api/v1/admin/user-details/{user_id}/status
+
+@pytest.mark.asyncio
+async def test_set_status_deactivates_user_without_profile(
+    client: AsyncClient, db_session: AsyncSession
+):
+    admin = await create_test_user(db_session, username="admin-status-profileless-admin@axiorapulse.com", role="admin")
+    target = await create_test_user(db_session, username="admin-status-profileless@axiorapulse.com")
+    authenticate_as(admin)
+
+    response = await client.patch(
+        f"/api/v1/admin/user-details/{target.id}/status",
+        json={"profile_status": "Inactive"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["user_id"] == target.id
+    assert data["profile_status"] == "Inactive"
+
+    # A skeleton profile now exists, so the deactivated user can no longer log in.
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": target.username, "password": "Test@12345"},
+    )
+    assert login_response.status_code == status.HTTP_403_FORBIDDEN
+    assert "inactive" in login_response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio

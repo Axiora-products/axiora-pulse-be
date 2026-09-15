@@ -12,6 +12,7 @@ Design:
 """
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -32,6 +33,10 @@ _NON_TERMINAL = {"created", "authenticated", "active", "pending", "halted"}
 # subscription counts as paid — 'authenticated' means checkout was authorized but
 # the charge hasn't been confirmed, so a mid-payment user is still routed to pay.
 _ENTITLED = {"active"}
+# Terminal / churned statuses — the paid relationship has ended (payment retries
+# exhausted, cancelled, run to completion, or expired). When a user's last entitled
+# subscription reaches one of these, their 'member' role is revoked to 'viewer'.
+_CHURNED = {"halted", "cancelled", "completed", "expired"}
 
 # Feature flag — when false, the payment gate is bypassed and every user is treated
 # as entitled. Intended for LOCAL DEVELOPMENT so developers can reach subscription-
@@ -53,6 +58,30 @@ def _epoch_to_dt(value) -> datetime | None:
         return datetime.fromtimestamp(int(value), tz=timezone.utc)
     except (ValueError, TypeError, OSError):
         return None
+
+
+@dataclass(frozen=True)
+class PlanLimits:
+    """The per-plan quota limits enforced by the entitlement layer.
+
+    Integer caps use ``None`` to mean "unlimited / not enforced". ``export_enabled``
+    is a hard boolean. Resolved via ``BillingService.get_plan_limits`` — always call
+    that rather than reading ``Plan`` columns directly, so admin bypass and the
+    ``SUBSCRIPTION_ENFORCED`` dev flag are honoured in one place.
+    """
+    workspace_limit: int | None
+    survey_response_cap: int | None
+    regeneration_limit: int | None
+    export_enabled: bool
+
+
+# Everything permitted — admins and (local dev) disabled enforcement.
+_UNLIMITED = PlanLimits(
+    workspace_limit=None,
+    survey_response_cap=None,
+    regeneration_limit=None,
+    export_enabled=True,
+)
 
 
 class BillingService:
@@ -264,15 +293,63 @@ class BillingService:
         await db.flush()
         logger.info("Subscription %s → status=%s", rzp_sub_id, subscription.status)
 
-        # Upgrade user role to "member" when subscription becomes entitled
-        if subscription.status in _ENTITLED and subscription.user_id:
-            user = (await db.execute(select(User).where(User.id == subscription.user_id))).scalar_one_or_none()
-            if user and (not user.has_role("admin")):
-                member_role = (await db.execute(select(Role).where(Role.name == "member"))).scalar_one_or_none()
-                if member_role and (not user.has_role("member")):
+        # Keep the user's role in sync with their subscription entitlement.
+        if subscription.user_id:
+            await self._sync_role_to_entitlement(subscription, db)
+
+    async def _sync_role_to_entitlement(self, subscription: Subscription, db: AsyncSession) -> None:
+        """Align the subscriber's role with their live entitlement.
+
+        - Subscription becomes ``active``  → upgrade viewer → member.
+        - Subscription churns (halted/cancelled/completed/expired) → downgrade
+          member → viewer, but ONLY if the user has no other still-active
+          subscription. Admins are never touched.
+        """
+        user = (
+            await db.execute(select(User).where(User.id == subscription.user_id))
+        ).scalar_one_or_none()
+        if user is None or user.has_role("admin"):
+            return
+
+        status = subscription.status
+
+        if status in _ENTITLED:
+            if not user.has_role("member"):
+                member_role = (
+                    await db.execute(select(Role).where(Role.name == "member"))
+                ).scalar_one_or_none()
+                if member_role:
                     user.role = member_role
                     await db.flush()
-                    logger.info("User %s role upgraded to member (subscription %s)", user.id, rzp_sub_id)
+                    logger.info(
+                        "User %s role upgraded to member (subscription %s)",
+                        user.id, subscription.razorpay_subscription_id,
+                    )
+            return
+
+        if status in _CHURNED and user.has_role("member"):
+            # Don't revoke if another subscription still grants entitlement.
+            other_active = (
+                await db.execute(
+                    select(Subscription.id).where(
+                        Subscription.user_id == user.id,
+                        Subscription.status.in_(_ENTITLED),
+                        Subscription.id != subscription.id,
+                    )
+                )
+            ).first()
+            if other_active is not None:
+                return
+            viewer_role = (
+                await db.execute(select(Role).where(Role.name == "viewer"))
+            ).scalar_one_or_none()
+            if viewer_role:
+                user.role = viewer_role
+                await db.flush()
+                logger.info(
+                    "User %s role downgraded to viewer (subscription %s churned: %s)",
+                    user.id, subscription.razorpay_subscription_id, status,
+                )
 
     async def _record_payment(self, entity: dict, db: AsyncSession) -> None:
         rzp_payment_id = entity.get("id")
@@ -347,6 +424,65 @@ class BillingService:
             )
         ).first()
         return row is not None
+
+    # ── Per-plan quota limits (entitlement layer) ──────────────────────────────
+
+    async def _resolve_active_plan(self, user: User, db: AsyncSession) -> Plan | None:
+        """Return the Plan behind the user's current entitled subscription, if any."""
+        subscription = (
+            await db.execute(
+                select(Subscription)
+                .where(Subscription.user_id == user.id, Subscription.status.in_(_ENTITLED))
+                .order_by(Subscription.created_at.desc())
+            )
+        ).scalars().first()
+        if subscription is None or subscription.plan_id is None:
+            return None
+        return (
+            await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
+        ).scalar_one_or_none()
+
+    async def get_plan_limits(self, user: User, db: AsyncSession) -> PlanLimits:
+        """Resolve the quota limits that apply to ``user`` right now.
+
+        The single place quota limits are read. Resolution order:
+          1. Admins and disabled enforcement (local dev) → unlimited.
+          2. The user's active (entitled) subscription plan.
+          3. Fallback: the lowest active tier, so caps are always defined even
+             before/without a subscription (paid features sit behind the paywall
+             anyway; this just keeps the numbers sane and never returns "unlimited"
+             for an ordinary user).
+        """
+        if not SUBSCRIPTION_ENFORCED or user.has_role("admin"):
+            return _UNLIMITED
+
+        plan = await self._resolve_active_plan(user, db)
+        if plan is None:
+            plan = (
+                await db.execute(
+                    select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.tier)
+                )
+            ).scalars().first()
+        if plan is None:
+            # No catalog at all — fail open rather than block every user.
+            return _UNLIMITED
+
+        return PlanLimits(
+            workspace_limit=plan.workspace_limit,
+            survey_response_cap=plan.survey_response_cap,
+            regeneration_limit=plan.regeneration_limit,
+            export_enabled=plan.export_enabled,
+        )
+
+    async def assert_export_allowed(self, user: User, db: AsyncSession) -> None:
+        """Raise 402 if the user's plan does not include report export."""
+        limits = await self.get_plan_limits(user, db)
+        if not limits.export_enabled:
+            raise HTTPException(
+                status.HTTP_402_PAYMENT_REQUIRED,
+                "Report export isn't included in your current plan. "
+                "Upgrade to Builder or Pro to export reports.",
+            )
 
 
 billing_service = BillingService()

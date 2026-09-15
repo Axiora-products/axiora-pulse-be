@@ -2,10 +2,11 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import PublicSurveyResponse, Survey, User, Workspace
@@ -69,8 +70,19 @@ class SurveyService:
         }
 
         mapped_questions = []
-        for idx, q in enumerate(agent_questions, start=1):
+        seen_normalized_texts = set()
+        idx = 1
+        for q in agent_questions:
             q_text = q.get("question_text") or q.get("question") or f"Question {idx}"
+            norm_key = " ".join(re.sub(r"[^\w\s]", " ", str(q_text).lower()).split())
+            if norm_key in seen_normalized_texts:
+                logger.info(
+                    "Skipping duplicate question during survey sync for workspace_id=%s: '%s'",
+                    workspace_id, q_text,
+                )
+                continue
+            seen_normalized_texts.add(norm_key)
+
             raw_type = str(q.get("question_type") or q.get("questionType") or "text").lower()
             q_type = type_mapping.get(raw_type, "text")
             options = q.get("options") or []
@@ -85,6 +97,7 @@ class SurveyService:
                     options=options,
                 )
             )
+            idx += 1
 
         req = SaveAllSurveyQuestionsRequest(
             userId=user_id,
@@ -414,12 +427,41 @@ class SurveyService:
                 detail="Survey not found.",
             )
 
+        # Enforce the survey owner's per-plan response cap. The respondent is
+        # anonymous, so the cap is resolved from the OWNER's plan (NULL = unlimited).
+        from app.services.billing_service import billing_service  # lazy: avoid import cycle
+
+        owner = (
+            await db.execute(select(User).where(User.id == survey.user_id))
+        ).scalar_one_or_none()
+        if owner is not None:
+            limits = await billing_service.get_plan_limits(owner, db)
+            if limits.survey_response_cap is not None:
+                collected = (
+                    await db.execute(
+                        select(func.count(PublicSurveyResponse.id)).where(
+                            PublicSurveyResponse.survey_id == survey.id
+                        )
+                    )
+                ).scalar_one()
+                if collected >= limits.survey_response_cap:
+                    logger.info(
+                        "Public survey %s rejected: response cap %s reached.",
+                        survey.id, limits.survey_response_cap,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This survey is no longer accepting responses.",
+                    )
+
         answers_payload = [ans.model_dump() for ans in payload.answers]
         now = datetime.now(timezone.utc)
 
         response_record = PublicSurveyResponse(
             survey_id=survey.id,
-            respondent_email=payload.respondentEmail.strip() if payload.respondentEmail else None,
+            respondent_name=payload.respondentName.strip(),
+            respondent_email=payload.respondentEmail.strip(),
+            contact_number=payload.contactNumber.strip() if payload.contactNumber else None,
             answers=answers_payload,
             submitted_at=now,
         )
@@ -429,8 +471,8 @@ class SurveyService:
         await db.refresh(response_record)
 
         logger.info(
-            "Public survey response submitted: response_id=%s survey_id=%s respondent=%s",
-            response_record.id, survey.id, payload.respondentEmail
+            "Public survey response submitted: response_id=%s survey_id=%s respondent=%s <%s>",
+            response_record.id, survey.id, payload.respondentName, payload.respondentEmail
         )
 
         # Fetch workspace to get workspace name for notification email
@@ -450,7 +492,9 @@ class SurveyService:
                     workspace_name=ws_name,
                     workspace_id=survey.workspace_id,
                     survey_id=survey.id,
-                    respondent_email=payload.respondentEmail.strip() if payload.respondentEmail else None,
+                    respondent_name=payload.respondentName.strip(),
+                    respondent_email=payload.respondentEmail.strip(),
+                    contact_number=payload.contactNumber.strip() if payload.contactNumber else None,
                     questions=survey.questions or [],
                     answers=answers_payload,
                     submitted_at=now,
@@ -530,6 +574,7 @@ class SurveyService:
         resp_data = [
             {
                 "response_id": r.id,
+                "respondent_name": r.respondent_name,
                 "respondent_email": r.respondent_email,
                 "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
                 "answers": r.answers,
@@ -564,7 +609,9 @@ class SurveyService:
         workspace_name: str,
         workspace_id: int,
         survey_id: int,
-        respondent_email: str | None,
+        respondent_name: str,
+        respondent_email: str,
+        contact_number: str | None,
         questions: list[dict],
         answers: list[dict],
         submitted_at: datetime,
@@ -577,7 +624,9 @@ class SurveyService:
                 workspace_name=workspace_name,
                 workspace_id=workspace_id,
                 survey_id=survey_id,
+                respondent_name=respondent_name,
                 respondent_email=respondent_email,
+                contact_number=contact_number,
                 questions=questions,
                 answers=answers,
                 submitted_at=submitted_at,

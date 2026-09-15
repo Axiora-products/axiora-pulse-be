@@ -175,6 +175,36 @@ async def _get_user_by_identifier(
     return user
 
 
+async def _assert_user_active(user: User, db: AsyncSession) -> None:
+    """Block sign-in for accounts whose profile_status is Inactive or Suspended.
+
+    Users without a user_details row yet are treated as active (the default).
+    This keeps muted accounts from gaining access through any auth path —
+    password, login OTP, verify_otp, Google SSO, refresh, or admin login.
+    """
+    result = await db.execute(select(UserDetails).where(UserDetails.user_id == user.id))
+    details = result.scalar_one_or_none()
+    if details is None:
+        return
+
+    if details.profile_status == "Inactive":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Your account is inactive. "
+                "Please contact the administrator to reactivate your account."
+            ),
+        )
+    if details.profile_status == "Suspended":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Your account has been suspended. "
+                "Please contact support for assistance."
+            ),
+        )
+
+
 def _to_register_response(user: User) -> RegisterResponse:
     return RegisterResponse(
         userid=user.id,
@@ -339,6 +369,9 @@ class AuthService:
         if not user.register_mfa:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is not active.")
 
+        # Inactive / suspended accounts must not be able to keep refreshing tokens.
+        await _assert_user_active(user, db)
+
         session.revoked_at = now
         access_token, refresh_token = await _issue_token_pair(user, db)
         return RefreshTokenResponse(data=RefreshTokenData(accessToken=access_token, refreshToken=refresh_token))
@@ -397,8 +430,14 @@ class AuthService:
             user.login_otp = None
             user.login_otp_expiry = None
 
+            # Inactive / suspended accounts must not be able to sign in.
+            await _assert_user_active(user, db)
+
             access_token, refresh_token = await _issue_token_pair(user, db)
             logger.info("Login OTP verified via verify_otp for user id=%s (%s)", user.id, user.username)
+
+            from app.services.user_details_service import user_details_service
+            await user_details_service.touch_last_login(user.id, db)
 
             auth_actions_row = await _get_or_create_auth_actions(user.id, db)
             actions = ["dashboard"] if user.has_role("admin") else []
@@ -584,6 +623,9 @@ class AuthService:
                 detail="Account not verified. Please complete OTP verification.",
             )
 
+        # Inactive / suspended accounts must not be able to sign in.
+        await _assert_user_active(user, db)
+
         # Role-based login: the standard /login endpoint is for regular users
         # (viewer/member only). Admin accounts must use the admin login endpoint.
         if user.has_role("admin"):
@@ -674,6 +716,9 @@ class AuthService:
         user.login_otp = None
         user.login_otp_expiry = None
 
+        # Inactive / suspended accounts must not be able to sign in.
+        await _assert_user_active(user, db)
+
         # Generate tokens
         access_token, refresh_token = await _issue_token_pair(user, db)
 
@@ -762,6 +807,9 @@ class AuthService:
             is_new_user = True
             logger.info("Provisioned new Google account id=%s (%s).", user.id, email)
 
+        # Inactive / suspended accounts must not be able to sign in.
+        await _assert_user_active(user, db)
+
         access_token, refresh_token = await _issue_token_pair(user, db)
 
         from app.services.user_details_service import user_details_service
@@ -843,6 +891,9 @@ class AuthService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied. Admin privileges required.",
             )
+
+        # Inactive / suspended accounts must not be able to sign in.
+        await _assert_user_active(user, db)
 
         access_token, refresh_token = await _issue_token_pair(user, db)
 

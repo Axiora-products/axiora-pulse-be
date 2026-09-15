@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User, Workspace, WorkspaceAttachment
@@ -63,6 +63,28 @@ class WorkspaceService:
         """Create a new workspace owned by current_user."""
         now = datetime.now(timezone.utc)
 
+        # Enforce the per-plan workspace limit (NULL limit = unlimited; admins and
+        # disabled enforcement resolve to unlimited via get_plan_limits).
+        from app.services.billing_service import billing_service  # lazy: avoid import cycle
+
+        limits = await billing_service.get_plan_limits(current_user, db)
+        if limits.workspace_limit is not None:
+            active_count = (
+                await db.execute(
+                    select(func.count(Workspace.id)).where(
+                        Workspace.user_id == current_user.id,
+                        Workspace.is_delete.is_(False),
+                    )
+                )
+            ).scalar_one()
+            if active_count >= limits.workspace_limit:
+                raise HTTPException(
+                    status.HTTP_402_PAYMENT_REQUIRED,
+                    f"You've reached your plan's limit of {limits.workspace_limit} "
+                    f"workspace{'s' if limits.workspace_limit != 1 else ''}. "
+                    "Upgrade your plan to create more.",
+                )
+
         await self._ensure_unique_name(payload.name.strip(), current_user, db)
 
         workspace = Workspace(
@@ -76,7 +98,8 @@ class WorkspaceService:
                 "problem_statement": None,
                 "industry": "general",
                 "founder_validation_goal": "validate my idea",
-                "geography": "global"
+                "geography": "global",
+                "business_stage": "idea",
             },
             conversation_history=[],
             validation_result=None,
@@ -303,6 +326,13 @@ class WorkspaceService:
             validation_result=workspace.validation_result
         )
 
+        # Inject founder name into idea dict so mentor can use it for personalisation
+        if "founder_name" not in ws_state.idea or not ws_state.idea.get("founder_name"):
+            if current_user.display_name:
+                ws_state.idea["founder_name"] = current_user.display_name.strip().split()[0].title()
+            elif current_user.username:
+                ws_state.idea["founder_name"] = current_user.username.split("@")[0].title()
+
         updated_state = await mentor_service.process_message(
             state=ws_state,
             user_message=payload.message,
@@ -379,13 +409,24 @@ class WorkspaceService:
             "problem_statement": None,
             "industry": "general",
             "founder_validation_goal": "validate my idea",
-            "geography": "global"
+            "geography": "global",
+            "business_stage": "idea",
         }
 
+        # Personalise greeting with user's first name when available
+        user_first_name = ""
+        if current_user.display_name:
+            user_first_name = current_user.display_name.strip().split()[0].title()
+        elif current_user.username:
+            user_first_name = current_user.username.split("@")[0].title()
+
+        name_greeting = f"Hello {user_first_name}!" if user_first_name else "Hello!"
         initial_greeting = (
-            "Hello! I'm your AI Mentor at Axiora Pulse. "
-            "Tell me about your startup idea and the problem you're solving — "
-            "and together we'll validate its potential!"
+            f"{name_greeting} I'm Arya, your AI Mentor at Axiora Pulse. "
+            "I'm here to help you validate your idea, challenge the right assumptions, and build a clear path forward — "
+            "without wasting time or capital. "
+            "Tell me about your startup idea and the problem you're solving, "
+            "and let's work through this together."
         )
 
         workspace.state = "GATHERING_INFO"
@@ -463,7 +504,15 @@ class WorkspaceService:
             display_name = current_user.username.split("@")[0]
         display_name = display_name.strip().title()
 
-        file_bytes = certificate_service.generate_certificate(display_name)
+        issue_datetime = self._certificate_issue_datetime(workspace)
+        certificate_id = f"Pulse/{issue_datetime:%Y/%m}/{workspace.id:04d}"
+        issue_date = issue_datetime.strftime("%d %B %Y")
+
+        file_bytes = certificate_service.generate_certificate(
+            display_name,
+            certificate_id=certificate_id,
+            issue_date=issue_date,
+        )
 
         logger.info(
             "Certificate generated: workspace_id=%s user_id=%s name=%s",
@@ -478,6 +527,25 @@ class WorkspaceService:
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    def _certificate_issue_datetime(self, workspace: Workspace) -> datetime:
+        validation_result = workspace.validation_result or {}
+        created_at = validation_result.get("created_at")
+
+        if isinstance(created_at, datetime):
+            return created_at
+
+        if isinstance(created_at, str):
+            try:
+                return datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except ValueError:
+                logger.warning(
+                    "Unable to parse validation created_at for workspace_id=%s: %s",
+                    workspace.id,
+                    created_at,
+                )
+
+        return workspace.updated_at or datetime.now(timezone.utc)
 
     # ── Update Workspace Survey Questions (User Session) ──────────────────────
 

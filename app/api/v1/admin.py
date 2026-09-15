@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.models.admin_models import (
     AdminDashboardStatsResponse,
+    AdminDeleteUserResponse,
     AdminSurveyListResponse,
     AdminSurveyResponseDetailResponse,
     AdminSurveyResponsesListResponse,
@@ -103,6 +104,18 @@ async def get_user_survey_summary(
     Get a summary of a user's surveys and responses, for the administrator dashboard.
     """
     return await admin_service.get_user_survey_summary(db, user_id)
+
+
+@router.delete("/users/{user_id}", response_model=AdminDeleteUserResponse)
+@limiter.limit("30/minute")
+async def delete_user(
+    request: Request,
+    user_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminDeleteUserResponse:
+    """Permanently delete a user and all of their data from the database."""
+    return await admin_service.delete_user(db, user_id)
 
 
 @router.patch("/user-details/{user_id}/status", response_model=UserDetailsResponse)

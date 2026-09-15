@@ -484,7 +484,7 @@ async def send_login_otp_email(to_email: str, otp: int) -> OTPResult:
 def _build_registration_success_email(to_email: str, display_name: Optional[str] = None) -> MIMEMultipart:
     """Construct the branded 'account created' welcome email."""
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Welcome to Axiora Pulse — Your Account is Ready"
+    msg["Subject"] = "Welcome to Axiora Pulse. Your Account is Ready"
     msg["From"] = f"{_SMTP_FROM_NAME} <{_SMTP_FROM_EMAIL}>"
     msg["To"] = to_email
 
@@ -681,9 +681,11 @@ def _build_survey_response_notification_email(
     workspace_name: str,
     workspace_id: int,
     survey_id: int,
-    respondent_email: Optional[str],
+    respondent_name: str,
+    respondent_email: str,
     questions: list[dict],
     answers: list[dict],
+    contact_number: Optional[str] = None,
     submitted_at: Optional[datetime] = None,
 ) -> MIMEMultipart:
     """Construct the branded email notifying an Axiora member of a new survey response."""
@@ -699,8 +701,12 @@ def _build_survey_response_notification_email(
     timestamp_str = local_when.strftime("%B %d, %Y at %I:%M %p %Z")
     safe_timestamp = html.escape(timestamp_str)
     safe_workspace = html.escape(workspace_name)
-    display_respondent = respondent_email.strip() if respondent_email else "Anonymous / Not provided"
+    display_respondent_name = respondent_name.strip() if respondent_name else "Unknown Respondent"
+    display_respondent = respondent_email.strip() if respondent_email else "Not provided"
+    display_contact_number = contact_number.strip() if contact_number else "Not provided"
+    safe_respondent_name = html.escape(display_respondent_name)
     safe_respondent = html.escape(display_respondent)
+    safe_contact_number = html.escape(display_contact_number)
 
     # Build question mapping
     q_map: dict[Any, str] = {}
@@ -771,7 +777,9 @@ def _build_survey_response_notification_email(
         f"• Workspace: {workspace_name}\n"
         f"• Survey ID: #{survey_id}\n"
         f"• Submitted At: {timestamp_str}\n"
-        f"• Respondent Email: {display_respondent}\n\n"
+        f"• Respondent Name: {display_respondent_name}\n"
+        f"• Respondent Email: {display_respondent}\n"
+        f"• Contact Number: {display_contact_number}\n\n"
         f"Submitted Answers:\n"
         f"{chr(10).join(plain_qa_lines)}\n\n"
         f"Ready to analyze? Log in to Axiora Pulse and run the Survey Intelligence Analysis:\n"
@@ -818,7 +826,9 @@ def _build_survey_response_notification_email(
                 <td class="meta-grid-item" width="34%" style="vertical-align:top;padding-right:3px;padding-left:3px;">
                   <div class="meta-box" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;min-height:72px;">
                     <span style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Respondent</span>
-                    <span class="text-primary" style="display:block;font-size:13px;font-weight:600;color:#111827;word-break:break-all;">{safe_respondent}</span>
+                    <span class="text-primary" style="display:block;font-size:13px;font-weight:700;color:#111827;word-break:break-word;">{safe_respondent_name}</span>
+                    <span style="display:block;font-size:12px;font-weight:600;color:#6b7280;word-break:break-all;margin-top:2px;">{safe_respondent}</span>
+                    <span style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-top:2px;">{safe_contact_number}</span>
                   </div>
                 </td>
                 <td class="meta-grid-item" width="33%" style="vertical-align:top;padding-left:6px;">
@@ -890,9 +900,11 @@ async def send_survey_response_notification_email(
     workspace_name: str,
     workspace_id: int,
     survey_id: int,
-    respondent_email: Optional[str],
+    respondent_name: str,
+    respondent_email: str,
     questions: list[dict],
     answers: list[dict],
+    contact_number: Optional[str] = None,
     submitted_at: Optional[datetime] = None,
 ) -> OTPResult:
     """Send a response submission notification email to the survey owner (async, non-blocking).
@@ -905,7 +917,9 @@ async def send_survey_response_notification_email(
         workspace_name=workspace_name,
         workspace_id=workspace_id,
         survey_id=survey_id,
+        respondent_name=respondent_name,
         respondent_email=respondent_email,
+        contact_number=contact_number,
         questions=questions,
         answers=answers,
         submitted_at=submitted_at,

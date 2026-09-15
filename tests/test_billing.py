@@ -18,7 +18,9 @@ from app.core.dependencies import get_current_user
 from app.db.models import Payment, Plan, Role, Subscription, User, WebhookEvent
 from app.services.billing_service import (
     BillingService,
+    PlanLimits,
     SUBSCRIPTION_ENFORCED,
+    _UNLIMITED,
     _epoch_to_dt,
     billing_service,
 )
@@ -85,7 +87,7 @@ def authenticate_as(user: User) -> None:
     def _has_role(name: str) -> bool:
         return role_name == name
 
-    current_user = type("U", (), {"id": user.id, "username": user.username, "role": role_name, "has_role": _has_role})()
+    current_user = type("U", (), {"id": user.id, "username": user.username, "role": role_name, "has_role": staticmethod(_has_role)})()
     app.dependency_overrides[get_current_user] = lambda: current_user
 
 
@@ -325,6 +327,117 @@ async def test_has_active_entitlement_bypasses_when_flag_off(db_session: AsyncSe
         assert await billing_service.has_active_entitlement(user, db_session) is True
 
 
+# ── BillingService: plan limits / export gate ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_get_plan_limits_reads_active_plan(db_session: AsyncSession):
+    user = await _create_user(db_session)
+    plan = await _create_plan(db_session, code="builder", tier=2)
+    plan.workspace_limit = 3
+    plan.survey_response_cap = 500
+    plan.regeneration_limit = 5
+    plan.export_enabled = True
+    await _create_subscription(db_session, user, plan, status="active")
+    await db_session.commit()
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
+        limits = await billing_service.get_plan_limits(user, db_session)
+
+    assert isinstance(limits, PlanLimits)
+    assert limits.workspace_limit == 3
+    assert limits.survey_response_cap == 500
+    assert limits.regeneration_limit == 5
+    assert limits.export_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_get_plan_limits_admin_is_unlimited(db_session: AsyncSession):
+    admin = await _create_user(db_session, username="admin@axiorapulse.com", role_name="admin")
+    plan = await _create_plan(db_session, code="starter", tier=1)
+    plan.export_enabled = False  # restrictive plan exists, but admin bypasses it
+    await db_session.commit()
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
+        limits = await billing_service.get_plan_limits(admin, db_session)
+
+    assert limits == _UNLIMITED
+    assert limits.export_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_get_plan_limits_bypasses_when_flag_off(db_session: AsyncSession):
+    user = await _create_user(db_session)
+    plan = await _create_plan(db_session, code="starter", tier=1)
+    plan.export_enabled = False
+    await db_session.commit()
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", False):
+        limits = await billing_service.get_plan_limits(user, db_session)
+
+    assert limits.export_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_get_plan_limits_falls_back_to_lowest_tier_without_subscription(db_session: AsyncSession):
+    user = await _create_user(db_session)
+    starter = await _create_plan(db_session, code="starter", tier=1)
+    starter.workspace_limit = 1
+    starter.export_enabled = False
+    builder = await _create_plan(db_session, code="builder", tier=2)
+    builder.export_enabled = True
+    await db_session.commit()
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
+        limits = await billing_service.get_plan_limits(user, db_session)
+
+    # No subscription → lowest active tier (starter) applies.
+    assert limits.workspace_limit == 1
+    assert limits.export_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_assert_export_allowed_blocks_starter(db_session: AsyncSession):
+    user = await _create_user(db_session)
+    plan = await _create_plan(db_session, code="starter", tier=1)
+    plan.export_enabled = False
+    await _create_subscription(db_session, user, plan, status="active")
+    await db_session.commit()
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
+        with pytest.raises(Exception) as exc:
+            await billing_service.assert_export_allowed(user, db_session)
+    assert exc.value.status_code == 402
+
+
+@pytest.mark.asyncio
+async def test_assert_export_allowed_passes_for_builder(db_session: AsyncSession):
+    user = await _create_user(db_session)
+    plan = await _create_plan(db_session, code="builder", tier=2)
+    plan.export_enabled = True
+    await _create_subscription(db_session, user, plan, status="active")
+    await db_session.commit()
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
+        # Should not raise.
+        await billing_service.assert_export_allowed(user, db_session)
+
+
+@pytest.mark.asyncio
+async def test_api_export_survey_blocked_for_starter(client: AsyncClient, db_session: AsyncSession):
+    """The require_export_enabled dependency returns 402 before the route body runs."""
+    user = await _create_user(db_session)
+    plan = await _create_plan(db_session, code="starter", tier=1)
+    plan.export_enabled = False
+    await _create_subscription(db_session, user, plan, status="active")
+    await db_session.commit()
+    authenticate_as(user)
+
+    with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
+        resp = await client.get("/api/v1/surveys/1/export?format=json")
+
+    assert resp.status_code == 402
+
+
 # ── BillingService: webhook handling ───────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -402,6 +515,63 @@ async def test_record_payment_skips_duplicate_and_missing_id(db_session: AsyncSe
 @pytest.mark.asyncio
 async def test_apply_subscription_update_skips_missing_id(db_session: AsyncSession):
     await billing_service._apply_subscription_update({"status": "active"}, db_session)
+
+
+# ── BillingService: role sync on entitlement (churn downgrade) ──────────────────
+
+@pytest.mark.asyncio
+async def test_webhook_upgrades_viewer_to_member_on_active(db_session: AsyncSession):
+    user = await _create_user(db_session, username="up@axiorapulse.com", role_name="viewer")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, user, plan, status="created", rzp_sub_id="sub_up")
+    await db_session.commit()
+
+    await billing_service._apply_subscription_update({"id": "sub_up", "status": "active"}, db_session)
+
+    await db_session.refresh(user)
+    assert user.has_role("member")
+
+
+@pytest.mark.asyncio
+async def test_webhook_downgrades_member_to_viewer_on_churn(db_session: AsyncSession):
+    user = await _create_user(db_session, username="churn@axiorapulse.com", role_name="member")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, user, plan, status="active", rzp_sub_id="sub_churn")
+    await db_session.commit()
+
+    # Subscription is cancelled → member should be revoked to viewer.
+    await billing_service._apply_subscription_update({"id": "sub_churn", "status": "cancelled"}, db_session)
+
+    await db_session.refresh(user)
+    assert user.has_role("viewer")
+
+
+@pytest.mark.asyncio
+async def test_webhook_keeps_member_when_another_subscription_still_active(db_session: AsyncSession):
+    user = await _create_user(db_session, username="multi@axiorapulse.com", role_name="member")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, user, plan, status="active", rzp_sub_id="sub_x")
+    await _create_subscription(db_session, user, plan, status="active", rzp_sub_id="sub_y")
+    await db_session.commit()
+
+    # sub_x churns, but sub_y is still active → keep member.
+    await billing_service._apply_subscription_update({"id": "sub_x", "status": "halted"}, db_session)
+
+    await db_session.refresh(user)
+    assert user.has_role("member")
+
+
+@pytest.mark.asyncio
+async def test_webhook_never_downgrades_admin(db_session: AsyncSession):
+    admin = await _create_user(db_session, username="adminchurn@axiorapulse.com", role_name="admin")
+    plan = await _create_plan(db_session)
+    await _create_subscription(db_session, admin, plan, status="active", rzp_sub_id="sub_admin")
+    await db_session.commit()
+
+    await billing_service._apply_subscription_update({"id": "sub_admin", "status": "cancelled"}, db_session)
+
+    await db_session.refresh(admin)
+    assert admin.has_role("admin")
 
 
 # ── RazorpayService ────────────────────────────────────────────────────────────

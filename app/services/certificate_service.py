@@ -1,9 +1,4 @@
-"""
-Certificate of Completion generator for Axiora Pulse.
-
-Renders the user's name onto the branded certificate template PDF
-using the Alex Brush font in gold.
-"""
+"""Certificate generator for Axiora Pulse idea validation."""
 from __future__ import annotations
 
 import logging
@@ -20,18 +15,27 @@ _ALEX_BRUSH_FONT_PATH = (
     Path(__file__).resolve().parents[1] / "templates" / "fonts" / "AlexBrush-Regular.ttf"
 )
 
-# Gold colour (RGB 0–1)
-_GOLD = (0.831, 0.686, 0.216)
-_FONT_SIZE = 63
+_INK = (0.075, 0.025, 0.16)
+_BLACK = (0, 0, 0)
+_NAME_FONT_SIZE = 48
+_NAME_MIN_FONT_SIZE = 30
+_NAME_MAX_WIDTH_RATIO = 0.52
+_TEXT_FONT_SIZE = 8
 
 
 class CertificateService:
-    """Generates a personalised Certificate of Completion PDF."""
+    """Generates personalised idea validation certificates."""
 
-    def generate_certificate(self, display_name: str) -> bytes:
+    def generate_certificate(
+        self,
+        display_name: str,
+        *,
+        certificate_id: str | None = None,
+        issue_date: str | None = None,
+    ) -> bytes:
         """
-        Open the certificate template, draw *display_name* centred on
-        the first page, and return the resulting PDF as raw bytes.
+        Open the certificate template, draw dynamic fields as vector text, and
+        return the full-page landscape PDF bytes.
         """
         fontfile = str(_ALEX_BRUSH_FONT_PATH) if _ALEX_BRUSH_FONT_PATH.exists() else None
         if fontfile is None:
@@ -41,33 +45,84 @@ class CertificateService:
         doc = fitz.open(str(_CERTIFICATE_TEMPLATE_PATH))
         try:
             page = doc[0]
-            rect = page.rect  # full page dimensions
+            rect = page.rect
 
-            # Measure text width so we can centre it horizontally
             font_obj = fitz.Font(fontfile=fontfile)
-            text_width = font_obj.text_length(display_name, fontsize=_FONT_SIZE)
-
-            line_center_x = rect.width * 0.575  # center of the line on the certificate
-            x = line_center_x - (text_width / 2)
-            y = rect.height * 0.485  # name baseline at ~48.5% (above the line at ~51%)
+            font_size = self._fit_font_size(
+                font_obj,
+                display_name,
+                _NAME_FONT_SIZE,
+                rect.width * _NAME_MAX_WIDTH_RATIO,
+            )
+            text_width = font_obj.text_length(display_name, fontsize=font_size)
+            if page.rotation:
+                x = rect.width * 0.354
+                y = (rect.width + text_width) / 2 + 3
+                text_rotation = page.rotation
+            else:
+                x = (rect.width - text_width) / 2
+                y = rect.height * 0.485
+                text_rotation = 0
 
             page.insert_text(
                 fitz.Point(x, y),
                 display_name,
                 fontname="AlexBrush",
                 fontfile=fontfile,
-                fontsize=_FONT_SIZE,
-                color=_GOLD,
+                fontsize=font_size,
+                color=_INK,
+                rotate=text_rotation,
             )
 
-            pdf_bytes: bytes = doc.tobytes()
+            if certificate_id:
+                page.insert_text(
+                    fitz.Point(
+                        rect.width * 0.622,
+                        rect.width * 0.867,
+                    ),
+                    certificate_id,
+                    fontsize=_TEXT_FONT_SIZE,
+                    color=_BLACK,
+                    rotate=page.rotation,
+                )
+
+            if issue_date:
+                page.insert_text(
+                    fitz.Point(
+                        rect.width * 0.638,
+                        rect.width * 0.867,
+                    ),
+                    issue_date,
+                    fontsize=_TEXT_FONT_SIZE,
+                    color=_BLACK,
+                    rotate=page.rotation,
+                )
+
+            output_bytes = doc.tobytes(deflate=True, garbage=4)
         finally:
             doc.close()
 
         logger.info(
-            "Certificate generated for '%s': %d bytes", display_name, len(pdf_bytes)
+            "Certificate generated for '%s' as %s: %d bytes",
+            display_name,
+            "pdf",
+            len(output_bytes),
         )
-        return pdf_bytes
+        return output_bytes
+
+    def _fit_font_size(
+        self,
+        font_obj: fitz.Font,
+        text: str,
+        preferred_size: int,
+        max_width: float,
+    ) -> int:
+        font_size = preferred_size
+        while font_size > _NAME_MIN_FONT_SIZE:
+            if font_obj.text_length(text, fontsize=font_size) <= max_width:
+                return font_size
+            font_size -= 1
+        return _NAME_MIN_FONT_SIZE
 
 
 certificate_service = CertificateService()

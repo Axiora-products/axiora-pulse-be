@@ -110,7 +110,7 @@ class UserDetailsResponse(BaseModel):
     first_name: str
     last_name: str
     email: str
-    mobile_number: str
+    mobile_number: Optional[str] = None
     date_of_birth: Optional[date] = None
     gender: Optional[str] = None
     profile_status: str

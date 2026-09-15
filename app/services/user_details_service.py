@@ -35,6 +35,47 @@ async def _get_by_user_id(db: AsyncSession, user_id: int) -> UserDetails | None:
     return result.scalar_one_or_none()
 
 
+async def _create_skeleton_profile(
+    db: AsyncSession,
+    *,
+    user: User,
+    profile_status: str = "Active",
+) -> UserDetails:
+    """Create a minimal ``user_details`` row for a user who has none yet.
+
+    Used at sign-in time (so every login leaves a profile behind for admins
+    to manage) and by the admin status endpoint (so a user can be deactivated
+    even before they have completed onboarding). Returns the created row.
+    """
+    email = user.username.lower().strip()
+    display_name = (user.display_name or "").strip()
+
+    first_name = email.split("@", 1)[0]
+    last_name = ""
+    if display_name:
+        parts = display_name.split(None, 1)
+        first_name = parts[0]
+        if len(parts) > 1:
+            last_name = parts[1]
+
+    record = UserDetails(
+        profile_id=await _generate_unique_profile_id(db),
+        user_id=user.id,
+        first_name=first_name[:100],
+        last_name=last_name[:100],
+        email=email,
+        mobile_number=None,
+        profile_status=profile_status,
+        created_at=now_ist(),
+        updated_at=now_ist(),
+    )
+    db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    logger.info("Created skeleton user_details profile_id=%s for user_id=%s", record.profile_id, user.id)
+    return record
+
+
 class UserDetailsService:
     @staticmethod
     def _proxy_avatar(response: UserDetailsResponse) -> UserDetailsResponse:
@@ -122,10 +163,31 @@ class UserDetailsService:
     async def set_status_by_user_id(
         self, user_id: int, profile_status: str, db: AsyncSession
     ) -> UserDetailsResponse:
-        """Admin action: set a user's profile_status (Active/Inactive/Suspended) by user_id."""
+        """Admin action: set a user's profile_status (Active/Inactive/Suspended) by user_id.
+
+        If the user has no ``user_details`` row yet, a minimal profile is
+        created automatically so that the status can be set regardless of
+        whether the user has completed onboarding.
+        """
         record = await _get_by_user_id(db, user_id)
+
         if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found for this user.")
+            # Verify the user actually exists before creating a skeleton profile.
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+
+            record = await _create_skeleton_profile(
+                db, user=user, profile_status=profile_status
+            )
+            logger.info(
+                "Admin created skeleton profile_id=%s (user_id=%s) with profile_status=%s",
+                record.profile_id, user_id, profile_status,
+            )
+            return self._proxy_avatar(UserDetailsResponse.model_validate(record))
 
         record.profile_status = profile_status
         record.updated_at = now_ist()
@@ -139,10 +201,18 @@ class UserDetailsService:
 
     @staticmethod
     async def touch_last_login(user_id: int, db: AsyncSession) -> None:
-        """Stamp last_login_date (IST) on successful login. No-op if no profile exists yet."""
+        """Stamp last_login_date (IST) on successful login.
+
+        If the user has no ``user_details`` row yet, a skeleton profile is
+        created first so that every login leaves a profile behind.
+        """
         record = await _get_by_user_id(db, user_id)
-        if record is not None:
-            record.last_login_date = now_ist()
+        if record is None:
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user is None:
+                return
+            record = await _create_skeleton_profile(db, user=user)
+        record.last_login_date = now_ist()
 
 
 user_details_service = UserDetailsService()

@@ -590,7 +590,9 @@ async def test_submit_public_survey_success(client: AsyncClient, db_session: Asy
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
     payload = {
+        "respondentName": "Jane Doe",
         "respondentEmail": "respondent@example.com",
+        "contactNumber": "9876543210",
         "answers": [
             {"questionId": 1, "answer": "29"},
             {"questionId": 2, "answer": "Validate"},
@@ -608,29 +610,39 @@ async def test_submit_public_survey_success(client: AsyncClient, db_session: Asy
     )
     saved = result.scalar_one_or_none()
     assert saved is not None
+    assert saved.respondent_name == "Jane Doe"
     assert saved.respondent_email == "respondent@example.com"
+    assert saved.contact_number == "9876543210"
     assert len(saved.answers) == 2
 
 
 @pytest.mark.asyncio
 async def test_submit_public_survey_not_found(client: AsyncClient):
-    payload = {"answers": [{"questionId": 1, "answer": "x"}]}
+    payload = {
+        "respondentName": "Jane Doe",
+        "respondentEmail": "anon@example.com",
+        "answers": [{"questionId": 1, "answer": "x"}],
+    }
     response = await client.post("/api/v1/surveys/public/999999/submit", json=payload)
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_submit_public_survey_allows_missing_email(
+async def test_submit_public_survey_requires_respondent_details(
     client: AsyncClient, db_session: AsyncSession
 ):
-    user = await create_test_user(db_session, username="survey-public-noemail@axiorapulse.com")
+    user = await create_test_user(db_session, username="survey-public-nodetails@axiorapulse.com")
     workspace = await create_workspace(db_session, user_id=user.id)
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
-    payload = {"answers": [{"questionId": 1, "answer": "29"}]}
-    response = await client.post(f"/api/v1/surveys/public/{survey.public_token}/submit", json=payload)
+    for payload in (
+        {"answers": [{"questionId": 1, "answer": "29"}]},
+        {"respondentName": "Jane Doe", "answers": [{"questionId": 1, "answer": "29"}]},
+        {"respondentEmail": "mail@example.com", "answers": [{"questionId": 1, "answer": "29"}]},
+    ):
+        response = await client.post(f"/api/v1/surveys/public/{survey.public_token}/submit", json=payload)
 
-    assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 # get /api/v1/surveys/{survey_id}/responses — collected public responses
@@ -642,10 +654,10 @@ async def test_get_survey_responses_success(client: AsyncClient, db_session: Asy
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
     resp1 = PublicSurveyResponse(
-        survey_id=survey.id, respondent_email="a@example.com", answers=[{"questionId": 1, "answer": "1"}]
+        survey_id=survey.id, respondent_name="Alice", respondent_email="a@example.com", answers=[{"questionId": 1, "answer": "1"}]
     )
     resp2 = PublicSurveyResponse(
-        survey_id=survey.id, respondent_email="b@example.com", answers=[{"questionId": 1, "answer": "2"}]
+        survey_id=survey.id, respondent_name="Bob", respondent_email="b@example.com", contact_number="9876500000", answers=[{"questionId": 1, "answer": "2"}]
     )
     db_session.add_all([resp1, resp2])
     await db_session.commit()
@@ -699,6 +711,7 @@ async def test_submit_public_survey_does_not_auto_run_analysis(
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
     payload = {
+        "respondentName": "Taylor",
         "respondentEmail": "taker@example.com",
         "answers": [{"questionId": 1, "answer": "25"}],
     }
@@ -729,7 +742,9 @@ async def test_submit_public_survey_dispatches_email_notification(
     survey = await create_survey(db_session, user_id=user.id, workspace_id=workspace.id)
 
     payload = {
+        "respondentName": "Chris Customer",
         "respondentEmail": "customer@acme.com",
+        "contactNumber": "9876540000",
         "answers": [
             {"questionId": 1, "answer": "30"},
             {"questionId": 2, "answer": "Validate"},
@@ -748,7 +763,9 @@ async def test_submit_public_survey_dispatches_email_notification(
     assert kwargs["workspace_name"] == "Test Product"
     assert kwargs["workspace_id"] == workspace.id
     assert kwargs["survey_id"] == survey.id
+    assert kwargs["respondent_name"] == "Chris Customer"
     assert kwargs["respondent_email"] == "customer@acme.com"
+    assert kwargs["contact_number"] == "9876540000"
     assert len(kwargs["answers"]) == 2
 
 
@@ -780,6 +797,7 @@ async def test_manual_post_link_analysis_success(
 
     resp_record = PublicSurveyResponse(
         survey_id=survey.id,
+        respondent_name="Lead Person",
         respondent_email="lead@company.com",
         answers=[{"questionId": 1, "answer": "30"}, {"questionId": 2, "answer": "Validate"}],
     )
