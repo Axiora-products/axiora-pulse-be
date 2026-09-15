@@ -113,7 +113,9 @@ class AdminSurveyResponseItem(BaseModel):
     id: int
     response_code: str
     survey_id: int
-    respondent_email: Optional[str] = None
+    respondent_name: str
+    respondent_email: str
+    contact_number: Optional[str] = None
     answers: list[dict]
     answers_preview: list[AdminSurveyAnswerPreviewItem]
     submitted_at: datetime

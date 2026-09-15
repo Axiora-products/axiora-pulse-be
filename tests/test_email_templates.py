@@ -99,7 +99,9 @@ def test_build_survey_response_notification_email():
         workspace_name="Acme Workspace",
         workspace_id=42,
         survey_id=7,
+        respondent_name="Jane Respondent",
         respondent_email="respondent@example.com",
+        contact_number="9876500000",
         questions=questions,
         answers=answers,
     )
@@ -115,10 +117,14 @@ def test_build_survey_response_notification_email():
     }
 
     assert "Acme Workspace" in parts["text/html"]
+    assert "Jane Respondent" in parts["text/html"]
     assert "respondent@example.com" in parts["text/html"]
+    assert "9876500000" in parts["text/html"]
     assert "What is your main challenge?" in parts["text/html"]
     assert "Managing client feedback" in parts["text/html"]
     assert "View Survey &amp; Run Analysis" in parts["text/html"] or "View Survey & Run Analysis" in parts["text/html"]
     assert "What is your main challenge?" in parts["text/plain"]
     assert "Managing client feedback" in parts["text/plain"]
+    assert "Jane Respondent" in parts["text/plain"]
+    assert "9876500000" in parts["text/plain"]
 

@@ -11,7 +11,7 @@ Endpoints covered:
 from datetime import datetime
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 # ── Request Models ─────────────────────────────────────────────────────────────
@@ -92,7 +92,9 @@ class PublicAnswerItem(BaseModel):
 
 class SubmitPublicSurveyRequest(BaseModel):
     """Payload for submitting answers to a public survey."""
-    respondentEmail: Optional[str] = Field(None, description="Optional email address of respondent")
+    respondentName: str = Field(..., min_length=1, max_length=255, description="Full name of the respondent (mandatory)")
+    respondentEmail: EmailStr = Field(..., description="Email address of the respondent (mandatory)")
+    contactNumber: Optional[str] = Field(None, max_length=20, description="Optional contact number of the respondent")
     answers: List[PublicAnswerItem] = Field(..., description="List of answered questions")
 
 
@@ -115,7 +117,9 @@ class SingleSurveyResponseItem(BaseModel):
     """Recorded response from an external survey respondent."""
     id: int
     survey_id: int
-    respondent_email: Optional[str] = None
+    respondent_name: str
+    respondent_email: str
+    contact_number: Optional[str] = None
     answers: List[dict]
     submitted_at: datetime
 

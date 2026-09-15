@@ -267,7 +267,9 @@ class AdminService:
             term = f"%{search.strip()}%"
             filters.append(
                 or_(
+                    PublicSurveyResponse.respondent_name.ilike(term),
                     PublicSurveyResponse.respondent_email.ilike(term),
+                    PublicSurveyResponse.contact_number.ilike(term),
                     cast(PublicSurveyResponse.id, String).ilike(term),
                     cast(PublicSurveyResponse.answers, String).ilike(term),
                 )
@@ -486,7 +488,9 @@ class AdminService:
             id=response.id,
             response_code=self._response_code(response.id),
             survey_id=response.survey_id,
+            respondent_name=response.respondent_name,
             respondent_email=response.respondent_email,
+            contact_number=response.contact_number,
             answers=response.answers or [],
             answers_preview=self._build_answers_preview(survey.questions or [], response.answers or []),
             submitted_at=response.submitted_at,

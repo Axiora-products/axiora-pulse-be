@@ -418,7 +418,10 @@ class PublicSurveyResponse(Base):
     survey_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("surveys.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    respondent_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Mandatory respondent identity: full name + email; contact number is optional.
+    respondent_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    respondent_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     answers: Mapped[list] = mapped_column(
         JSON, nullable=False, default=list
     )

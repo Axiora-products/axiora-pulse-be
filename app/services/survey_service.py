@@ -432,7 +432,9 @@ class SurveyService:
 
         response_record = PublicSurveyResponse(
             survey_id=survey.id,
-            respondent_email=payload.respondentEmail.strip() if payload.respondentEmail else None,
+            respondent_name=payload.respondentName.strip(),
+            respondent_email=payload.respondentEmail.strip(),
+            contact_number=payload.contactNumber.strip() if payload.contactNumber else None,
             answers=answers_payload,
             submitted_at=now,
         )
@@ -442,8 +444,8 @@ class SurveyService:
         await db.refresh(response_record)
 
         logger.info(
-            "Public survey response submitted: response_id=%s survey_id=%s respondent=%s",
-            response_record.id, survey.id, payload.respondentEmail
+            "Public survey response submitted: response_id=%s survey_id=%s respondent=%s <%s>",
+            response_record.id, survey.id, payload.respondentName, payload.respondentEmail
         )
 
         # Fetch workspace to get workspace name for notification email
@@ -463,7 +465,9 @@ class SurveyService:
                     workspace_name=ws_name,
                     workspace_id=survey.workspace_id,
                     survey_id=survey.id,
-                    respondent_email=payload.respondentEmail.strip() if payload.respondentEmail else None,
+                    respondent_name=payload.respondentName.strip(),
+                    respondent_email=payload.respondentEmail.strip(),
+                    contact_number=payload.contactNumber.strip() if payload.contactNumber else None,
                     questions=survey.questions or [],
                     answers=answers_payload,
                     submitted_at=now,
@@ -543,6 +547,7 @@ class SurveyService:
         resp_data = [
             {
                 "response_id": r.id,
+                "respondent_name": r.respondent_name,
                 "respondent_email": r.respondent_email,
                 "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
                 "answers": r.answers,
@@ -577,7 +582,9 @@ class SurveyService:
         workspace_name: str,
         workspace_id: int,
         survey_id: int,
-        respondent_email: str | None,
+        respondent_name: str,
+        respondent_email: str,
+        contact_number: str | None,
         questions: list[dict],
         answers: list[dict],
         submitted_at: datetime,
@@ -590,7 +597,9 @@ class SurveyService:
                 workspace_name=workspace_name,
                 workspace_id=workspace_id,
                 survey_id=survey_id,
+                respondent_name=respondent_name,
                 respondent_email=respondent_email,
+                contact_number=contact_number,
                 questions=questions,
                 answers=answers,
                 submitted_at=submitted_at,

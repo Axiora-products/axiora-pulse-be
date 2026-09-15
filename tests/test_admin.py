@@ -90,12 +90,16 @@ async def create_survey_response(
     db_session: AsyncSession,
     *,
     survey_id: int,
-    respondent_email: str | None = None,
+    respondent_name: str = "Test Respondent",
+    respondent_email: str = "respondent@example.com",
+    contact_number: str | None = None,
     answers: list[dict] | None = None,
 ) -> PublicSurveyResponse:
     response = PublicSurveyResponse(
         survey_id=survey_id,
+        respondent_name=respondent_name,
         respondent_email=respondent_email,
+        contact_number=contact_number,
         answers=answers if answers is not None else [{"questionId": 1, "answer": "Yes"}],
     )
     db_session.add(response)
