@@ -20,19 +20,14 @@ no longer match the new prices. After this migration:
 Until back-filled, `subscribe` returns 503 for builder/pro — the correct safe state
 (a clear "not configured" beats charging the wrong amount).
 
-NOTE (release ordering): this revision and 0031 (plan quota columns, on a separate
-branch) both descend from 0030. Whichever lands second creates a second Alembic head
-— resolve with `alembic merge heads` (or rebase this branch onto 0031 so the chain
-is linear 0030→0031→0032).
-
-Revision ID: 0032
-Revises: 0030
+Revision ID: 0033
+Revises: 0032
 Create Date: 2026-09-14
 """
 from alembic import op
 
-revision = "0032"
-down_revision = "0030"
+revision = "0033"
+down_revision = "0032"
 branch_labels = None
 depends_on = None
 
