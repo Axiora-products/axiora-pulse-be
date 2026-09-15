@@ -111,13 +111,23 @@ async def test_submit_public_survey_blocks_at_response_cap(db_session: AsyncSess
     await db_session.flush()
     # One response already collected → at the cap of 1.
     db_session.add(
-        PublicSurveyResponse(survey_id=survey.id, answers=[], submitted_at=datetime.now(timezone.utc))
+        PublicSurveyResponse(
+            survey_id=survey.id,
+            respondent_name="Test Respondent",   # NOT NULL since migration 0031
+            respondent_email="resp@example.com",  # NOT NULL since migration 0031
+            answers=[],
+            submitted_at=datetime.now(timezone.utc),
+        )
     )
     await db_session.commit()
 
     with patch("app.services.billing_service.SUBSCRIPTION_ENFORCED", True):
         with pytest.raises(HTTPException) as exc:
             await survey_service.submit_public_survey(
-                "tok_cap", SubmitPublicSurveyRequest(answers=[]), db_session
+                "tok_cap",
+                SubmitPublicSurveyRequest(
+                    respondentName="R", respondentEmail="r@example.com", answers=[]
+                ),
+                db_session,
             )
     assert exc.value.status_code == 403
