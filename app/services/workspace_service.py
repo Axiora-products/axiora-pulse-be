@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User, Workspace, WorkspaceAttachment
@@ -62,6 +62,28 @@ class WorkspaceService:
     ) -> WorkspaceResponse:
         """Create a new workspace owned by current_user."""
         now = datetime.now(timezone.utc)
+
+        # Enforce the per-plan workspace limit (NULL limit = unlimited; admins and
+        # disabled enforcement resolve to unlimited via get_plan_limits).
+        from app.services.billing_service import billing_service  # lazy: avoid import cycle
+
+        limits = await billing_service.get_plan_limits(current_user, db)
+        if limits.workspace_limit is not None:
+            active_count = (
+                await db.execute(
+                    select(func.count(Workspace.id)).where(
+                        Workspace.user_id == current_user.id,
+                        Workspace.is_delete.is_(False),
+                    )
+                )
+            ).scalar_one()
+            if active_count >= limits.workspace_limit:
+                raise HTTPException(
+                    status.HTTP_402_PAYMENT_REQUIRED,
+                    f"You've reached your plan's limit of {limits.workspace_limit} "
+                    f"workspace{'s' if limits.workspace_limit != 1 else ''}. "
+                    "Upgrade your plan to create more.",
+                )
 
         await self._ensure_unique_name(payload.name.strip(), current_user, db)
 

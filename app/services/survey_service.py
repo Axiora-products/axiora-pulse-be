@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import PublicSurveyResponse, Survey, User, Workspace
@@ -426,6 +426,33 @@ class SurveyService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Survey not found.",
             )
+
+        # Enforce the survey owner's per-plan response cap. The respondent is
+        # anonymous, so the cap is resolved from the OWNER's plan (NULL = unlimited).
+        from app.services.billing_service import billing_service  # lazy: avoid import cycle
+
+        owner = (
+            await db.execute(select(User).where(User.id == survey.user_id))
+        ).scalar_one_or_none()
+        if owner is not None:
+            limits = await billing_service.get_plan_limits(owner, db)
+            if limits.survey_response_cap is not None:
+                collected = (
+                    await db.execute(
+                        select(func.count(PublicSurveyResponse.id)).where(
+                            PublicSurveyResponse.survey_id == survey.id
+                        )
+                    )
+                ).scalar_one()
+                if collected >= limits.survey_response_cap:
+                    logger.info(
+                        "Public survey %s rejected: response cap %s reached.",
+                        survey.id, limits.survey_response_cap,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This survey is no longer accepting responses.",
+                    )
 
         answers_payload = [ans.model_dump() for ans in payload.answers]
         now = datetime.now(timezone.utc)
