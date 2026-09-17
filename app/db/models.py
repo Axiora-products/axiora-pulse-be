@@ -274,6 +274,89 @@ class UserInteractiveQuestionnaire(Base):
         return f"<UserInteractiveQuestionnaire id={self.id} user_id={self.user_id} questionnaire_id={self.questionnaire_id}>"
 
 
+class FeedbackQuestionnaire(Base):
+    """Admin-defined question template for the feedback form."""
+
+    __tablename__ = "feedback_questionnaires"
+    __table_args__ = (
+        CheckConstraint(
+            "answer_type IN ('textarea', 'radiobuttons', 'checkboxes', 'dropdown', 'emoji')",
+            name="ck_feedback_questionnaires_answer_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    optional: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    answers: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    is_display: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<FeedbackQuestionnaire id={self.id} answer_type={self.answer_type!r}>"
+
+
+class UserFeedbackQuestionnaire(Base):
+    """Stores a user's feedback responses to a feedback questionnaire template."""
+
+    __tablename__ = "user_feedback_questionnaires"
+    __table_args__ = (
+        Index(
+            "ix_user_feedback_questionnaires_user_id_workspace_id_questionnaire_id",
+            "user_id",
+            "workspace_id",
+            "questionnaire_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    questionnaire_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("feedback_questionnaires.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_answers: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    submission_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserFeedbackQuestionnaire id={self.id} user_id={self.user_id} questionnaire_id={self.questionnaire_id}>"
+
+
 class Workspace(Base):
     """
     Persisted Workspace record — scoped to a user.
