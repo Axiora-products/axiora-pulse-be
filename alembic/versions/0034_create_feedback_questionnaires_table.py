@@ -1,7 +1,7 @@
 """Create feedback_questionnaires table
 
-Revision ID: 0032
-Revises: 0031
+Revision ID: 0034
+Revises: 0033
 Create Date: 2026-09-17
 """
 from typing import Sequence, Union
@@ -11,8 +11,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # ── Revision identifiers ───────────────────────────────────────────────────────
-revision: str = "0032"
-down_revision: Union[str, None] = "0031"
+revision: str = "0034"
+down_revision: Union[str, None] = "0033"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

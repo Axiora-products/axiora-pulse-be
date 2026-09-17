@@ -1,7 +1,7 @@
 """Add emoji answer type to feedback_questionnaires
 
-Revision ID: 0034
-Revises: 0033
+Revision ID: 0036
+Revises: 0035
 Create Date: 2026-09-17
 """
 from typing import Sequence, Union
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 from alembic import op
 
 # ── Revision identifiers ───────────────────────────────────────────────────────
-revision: str = "0034"
-down_revision: Union[str, None] = "0033"
+revision: str = "0036"
+down_revision: Union[str, None] = "0035"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
