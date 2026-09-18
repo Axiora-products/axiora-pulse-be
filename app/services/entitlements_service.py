@@ -68,6 +68,11 @@ class EntitlementsService:
         per-payment grant amounts (Builder 3/500, Pro 10/2000). Accumulates; never
         decrements.
         """
+        # The free tier IS the baseline — it must never grant on top of itself.
+        # (Starter has no Razorpay plan so never charges; this is a defensive guard.)
+        if (plan.price_monthly or 0) <= 0:
+            return
+
         row = await self.get_or_create(user_id, db)
         row.allowed_workspaces += plan.workspace_limit or 0
         row.allowed_responses += plan.survey_response_cap or 0

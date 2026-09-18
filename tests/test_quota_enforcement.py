@@ -57,8 +57,11 @@ async def _user(db: AsyncSession, username: str, role_name: str = "viewer") -> U
     return user
 
 
-async def _plan(db: AsyncSession, code: str, tier: int, ws: int, resp: int) -> Plan:
-    plan = Plan(code=code, name=code.title(), tier=tier, is_active=True, workspace_limit=ws, survey_response_cap=resp)
+async def _plan(db: AsyncSession, code: str, tier: int, ws: int, resp: int, price: int = 299) -> Plan:
+    plan = Plan(
+        code=code, name=code.title(), tier=tier, is_active=True,
+        workspace_limit=ws, survey_response_cap=resp, price_monthly=price,
+    )
     db.add(plan)
     await db.flush()
     return plan
@@ -123,6 +126,20 @@ async def test_grant_for_plan_accumulates_and_never_decrements(db_session: Async
     row = await entitlements_service.get_or_create(user.id, db_session)
     assert row.allowed_workspaces == FREE_WORKSPACES + 6   # 7
     assert row.allowed_responses == FREE_RESPONSES + 1000  # 1100
+
+
+@pytest.mark.asyncio
+async def test_grant_for_plan_skips_free_tier(db_session: AsyncSession):
+    # The free tier is the baseline — granting it must NOT add on top (this is the
+    # bug 0038 fixes: legacy active Starter subs must not inflate the allowance).
+    user = await _user(db_session, "freegrant@axiorapulse.com")
+    starter = await _plan(db_session, "starter", 1, ws=1, resp=100, price=0)
+    await db_session.commit()
+
+    await entitlements_service.grant_for_plan(user.id, starter, db_session)
+    row = await entitlements_service.get_or_create(user.id, db_session)
+    assert row.allowed_workspaces == FREE_WORKSPACES   # 1, not 2
+    assert row.allowed_responses == FREE_RESPONSES     # 100, not 200
 
 
 # ── Response pool (account-wide) ────────────────────────────────────────────────
