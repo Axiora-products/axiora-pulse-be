@@ -266,11 +266,36 @@ class BillingService:
 
         if sub_entity:
             await self._apply_subscription_update(sub_entity, db)
+            # Each successful charge (including every monthly renewal) accumulates the
+            # plan's workspace/response grant onto the user's allowance.
+            if event_type == "subscription.charged":
+                await self._grant_charge_entitlements(sub_entity, db)
         if pay_entity:
             await self._record_payment(pay_entity, db)
 
         event.processed = True
         await db.flush()
+
+    async def _grant_charge_entitlements(self, entity: dict, db: AsyncSession) -> None:
+        """On subscription.charged, add the plan's grant to the user's allowance."""
+        rzp_sub_id = entity.get("id")
+        if not rzp_sub_id:
+            return
+        subscription = (
+            await db.execute(
+                select(Subscription).where(Subscription.razorpay_subscription_id == rzp_sub_id)
+            )
+        ).scalar_one_or_none()
+        if subscription is None or not subscription.user_id or subscription.plan_id is None:
+            return
+        plan = (
+            await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
+        ).scalar_one_or_none()
+        if plan is None:
+            return
+        from app.services.entitlements_service import entitlements_service  # lazy: avoid cycle
+
+        await entitlements_service.grant_for_plan(subscription.user_id, plan, db)
 
     async def _apply_subscription_update(self, entity: dict, db: AsyncSession) -> None:
         rzp_sub_id = entity.get("id")

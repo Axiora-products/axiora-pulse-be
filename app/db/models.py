@@ -696,6 +696,38 @@ class Plan(Base):
         return f"<Plan id={self.id} code={self.code!r} tier={self.tier}>"
 
 
+class UserAllowedWorkspaces(Base):
+    """Per-user accumulating entitlements (issues #191/#192/#194).
+
+    A running allowance that only ever grows: free baseline (1 workspace / 100
+    responses), plus each paid Razorpay charge adds the plan's amounts on top
+    (Builder +3 / +500, Pro +10 / +2000), including on every monthly renewal.
+    There is no decrement. Only the two limits enforced today live here; export
+    stays a per-plan on/off, and storage/regenerations/analytics are not built.
+    """
+
+    __tablename__ = "user_allowed_workspaces"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_user_allowed_workspaces_user_id"),
+        Index("ix_user_allowed_workspaces_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    allowed_workspaces: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    allowed_responses: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserAllowedWorkspaces user_id={self.user_id} "
+            f"workspaces={self.allowed_workspaces} responses={self.allowed_responses}>"
+        )
+
+
 class Subscription(Base):
     """
     A user's subscription to a Razorpay plan.
