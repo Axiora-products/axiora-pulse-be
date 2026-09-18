@@ -63,26 +63,25 @@ class WorkspaceService:
         """Create a new workspace owned by current_user."""
         now = datetime.now(timezone.utc)
 
-        # Enforce the per-plan workspace limit (NULL limit = unlimited; admins and
-        # disabled enforcement resolve to unlimited via get_plan_limits).
-        from app.services.billing_service import billing_service  # lazy: avoid import cycle
+        # Enforce the per-user workspace allowance (accumulating model). Counts BOTH
+        # active and archived workspaces, since permanent delete is disabled so nothing
+        # frees a slot. None = unlimited (admin / enforcement off).
+        from app.services.entitlements_service import entitlements_service  # lazy: avoid import cycle
 
-        limits = await billing_service.get_plan_limits(current_user, db)
-        if limits.workspace_limit is not None:
-            active_count = (
+        allowed_workspaces, _ = await entitlements_service.get_caps(current_user, db)
+        if allowed_workspaces is not None:
+            total = (
                 await db.execute(
                     select(func.count(Workspace.id)).where(
-                        Workspace.user_id == current_user.id,
-                        Workspace.is_delete.is_(False),
+                        Workspace.user_id == current_user.id
                     )
                 )
             ).scalar_one()
-            if active_count >= limits.workspace_limit:
+            if total >= allowed_workspaces:
                 raise HTTPException(
                     status.HTTP_402_PAYMENT_REQUIRED,
-                    f"You've reached your plan's limit of {limits.workspace_limit} "
-                    f"workspace{'s' if limits.workspace_limit != 1 else ''}. "
-                    "Upgrade your plan to create more.",
+                    f"You've reached your workspace limit of {allowed_workspaces}. "
+                    "Upgrade your plan or buy more to add workspaces.",
                 )
 
         await self._ensure_unique_name(payload.name.strip(), current_user, db)

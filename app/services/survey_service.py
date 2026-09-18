@@ -427,27 +427,28 @@ class SurveyService:
                 detail="Survey not found.",
             )
 
-        # Enforce the survey owner's per-plan response cap. The respondent is
-        # anonymous, so the cap is resolved from the OWNER's plan (NULL = unlimited).
-        from app.services.billing_service import billing_service  # lazy: avoid import cycle
+        # Enforce the owner's accumulating response allowance — an account-wide pool
+        # across ALL their surveys (not per-survey). Respondent is anonymous, so the
+        # allowance is resolved from the OWNER. None = unlimited (admin / enforcement off).
+        from app.services.entitlements_service import entitlements_service  # lazy: avoid import cycle
 
         owner = (
             await db.execute(select(User).where(User.id == survey.user_id))
         ).scalar_one_or_none()
         if owner is not None:
-            limits = await billing_service.get_plan_limits(owner, db)
-            if limits.survey_response_cap is not None:
+            _, allowed_responses = await entitlements_service.get_caps(owner, db)
+            if allowed_responses is not None:
                 collected = (
                     await db.execute(
-                        select(func.count(PublicSurveyResponse.id)).where(
-                            PublicSurveyResponse.survey_id == survey.id
-                        )
+                        select(func.count(PublicSurveyResponse.id))
+                        .join(Survey, PublicSurveyResponse.survey_id == Survey.id)
+                        .where(Survey.user_id == owner.id)
                     )
                 ).scalar_one()
-                if collected >= limits.survey_response_cap:
+                if collected >= allowed_responses:
                     logger.info(
-                        "Public survey %s rejected: response cap %s reached.",
-                        survey.id, limits.survey_response_cap,
+                        "Public survey %s rejected: owner %s at response allowance %s.",
+                        survey.id, owner.id, allowed_responses,
                     )
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
